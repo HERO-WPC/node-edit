@@ -17,7 +17,10 @@
     --border-2:  #2e3d55;
     --fg:        #e6edf6;
     --fg-dim:    #9fb0c6;
-    --fg-mute:   #6d7f96;
+    /* 弱化文字：原 #6d7f96 在卡片面上只有 4.35:1，低于 AA 的 4.5。
+       #8698ae 实测最低 4.75:1（选中态底色），其余背景 5.1~6.3:1。 */
+    --fg-mute:   #8698ae;
+    --placeholder: #7b8ba0;   /* 原 #5a6b82 仅 3.43:1；此值在输入框底 5.36:1 */
     --accent:    #5b9dff;
     --accent-2:  #7c8cff;
     --accent-dim:#1d2c45;
@@ -144,7 +147,7 @@
     line-height: 1.65; padding: 10px 11px; resize: vertical;
     transition: border-color .14s, box-shadow .14s;
   }
-  textarea::placeholder, input::placeholder { color: #5a6b82; }
+  textarea::placeholder, input::placeholder { color: var(--placeholder); }
   textarea:focus, input[type=text]:focus, input[type=number]:focus, select:focus {
     outline: none; border-color: var(--accent);
     box-shadow: 0 0 0 3px rgba(91,157,255,.16);
@@ -251,7 +254,7 @@
     content: ""; position: absolute; inset: 0 auto 0 0; width: 3px;
     background: linear-gradient(180deg, var(--accent) 0%, var(--accent-2) 100%);
   }
-  .editor .fld { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--fg-mute); }
+  .editor .fld { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--fg-dim); }
   .editor .fld input, .editor .fld select { font-size: 13px; color: var(--fg); }
   .editor .row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 11px; margin-bottom: 11px; }
   @media (max-width: 900px) { .editor .row { grid-template-columns: 1fr 1fr; } }
@@ -260,6 +263,14 @@
     letter-spacing: .6px; text-transform: uppercase; font-weight: 700;
   }
   .editor h3:first-of-type { margin-top: 4px; }
+  /* 参数区在 xhttp 下不可用：不要用 opacity 压文字（会掉到 1.9:1 看不清），
+     改用背景+边框区分禁用态，文字仍保持可读。 */
+  #edParamsRow.is-off, .opts.is-off { opacity: 1; }
+  #edParamsRow.is-off .fld, .opts.is-off label { color: var(--fg-mute); }
+  #edParamsRow.is-off input, .opts.is-off input, #edParamsRow.is-off select {
+    background: #0a0f16; border-color: #1b2634; color: #7f8ea3;
+  }
+  #edParamsRow.is-off input::placeholder { color: #75859b; }
 
   .prev {
     font-family: var(--mono); font-size: 11.5px; word-break: break-all;
@@ -267,8 +278,8 @@
     border-left: 3px solid var(--accent) !important; border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
     padding: 8px 11px; margin: 7px 0; color: #9ec1ff;
   }
-  .prev.old { border-left-color: var(--fg-mute) !important; color: var(--fg-mute); }
-  #prevEnc { color: var(--fg-mute) !important; font-size: 11px !important; }
+  .prev.old { border-left-color: var(--fg-mute) !important; color: var(--fg-dim); }
+  #prevEnc { color: var(--fg-mute) !important; font-size: 11.5px !important; }
 
   /* ============ 底部参数详解 ============ */
   details.params-doc { margin-top: 24px; }
@@ -467,6 +478,25 @@
         <label>已有参数
           <select id="bExist"><option value="keep" selected>保留</option><option value="overwrite">覆盖</option><option value="copy">复制新节点</option></select></label>
         <button class="btn mini" id="bApply">应用到所选</button>
+      </div>
+    </div>
+
+    <div class="srcbox" id="sniBox" style="margin-top:12px">
+      <div class="cap">批量替换 SNI / Host</div>
+      <div class="opts" style="margin:4px 0">
+        <label>查找 <input type="text" id="sniFind" placeholder="留空=整体设为右侧值" style="width:190px"></label>
+        <label>替换为 <input type="text" id="sniRepl" placeholder="cdn.example.com" style="width:190px"></label>
+      </div>
+      <div class="opts" style="margin:4px 0">
+        <b>替换范围：</b>
+        <label><input type="checkbox" id="sniF1" checked> SNI（sni / servername）</label>
+        <label><input type="checkbox" id="sniF2" checked> Host（host / headers.Host）</label>
+        <button class="btn mini" id="bSni">替换所选</button>
+        <button class="btn mini gray" id="bSniAll">替换全部</button>
+      </div>
+      <div class="hint">
+        「查找」支持 <code>*</code> 通配：<code>*.old.com</code> 只匹配该后缀；不含 <code>*</code> 时按子串替换（全部出现处）；
+        留空表示把整条值设为「替换为」。同时会同步 <code>path</code> 里同名的参数，避免两种写法不一致。
       </div>
     </div>
 
@@ -745,6 +775,53 @@ function setNodeParams(n, params, existMode) {
 }
 function cloneNode(n) {
   return Object.assign({}, n, { q: n.q.map(x => [x[0], x[1]]), pp: n.pp.map(x => [x[0], x[1]]) });
+}
+/* 同步更新节点 query 数组里的键值（buildNode 是从 n.q 重建链接的）。
+   别名用于 sni：TLS 场景下一些客户端也接受 servername 写法。 */
+function setNodeQ(n, key, value) {
+  const aliases = key === 'sni' ? ['sni', 'servername'] : [key];
+  if (!Array.isArray(n.q)) return;
+  let hit = -1;
+  for (const a of aliases) {
+    const i = n.q.findIndex(([k]) => k === a);
+    if (i > -1) { hit = i; break; }
+  }
+  if (value === '' || value == null) {
+    for (const a of aliases) {
+      for (let i = n.q.length - 1; i >= 0; i--) if (n.q[i][0] === a) n.q.splice(i, 1);
+    }
+    return;
+  }
+  if (hit > -1) {
+    n.q[hit][0] = key;          // 规范成 sni
+    n.q[hit][1] = value;
+    const keep = n.q[hit];
+    for (let i = n.q.length - 1; i >= 0; i--) {
+      if (i !== hit && aliases.includes(n.q[i][0])) n.q.splice(i, 1);
+    }
+  } else n.q.push([key, value]);
+}
+/* 把 query 值同步进内层 path 参数（path 里有 sni/host 时），使两种写法不分叉 */
+function syncPathParam(n, key, value) {
+  if (!n.pp || !n.pp.length) return;
+  const i = n.pp.findIndex(([k]) => k === key);
+  if (i < 0) return;
+  for (let j = n.pp.length - 1; j >= 0; j--) {
+    if (j !== i && n.pp[j][0] === key) n.pp.splice(j, 1);
+  }
+  if (value === '' || value == null) n.pp.splice(i, 1);
+  else n.pp[i][1] = value;
+}
+/* 取值替换：pattern 留空=整体替换；支持 * 通配；否则按子串替换 */
+function replaceValue(value, pattern, replacement) {
+  const v = String(value == null ? '' : value);
+  const p = String(pattern == null ? '' : pattern).trim();
+  if (!p) return replacement;
+  if (p.includes('*')) {
+    const rx = new RegExp('^' + p.split('*').map(s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('.*') + '$');
+    return rx.test(v) ? replacement : v;
+  }
+  return v.split(p).join(replacement);
 }
 function nodeParamStr(n) {
   return n.pp.filter(([k]) => ['p','s','wk','rm'].includes(k)).map(([k,v]) => k + '=' + v).join('  ') || '无';
@@ -1299,7 +1376,7 @@ function openEditor(i) {
   document.getElementById('prevOld').textContent = '原始：' + n.raw;
   const isX = n.type === 'xhttp' || n.type === 'splithttp';
   document.getElementById('edXhttpHint').style.display = isX ? '' : 'none';
-  document.getElementById('edParamsRow').style.opacity = isX ? 0.45 : 1;
+  document.getElementById('edParamsRow').classList.toggle('is-off', isX);
   ['edP','edS','edWk','edRm'].forEach(id => document.getElementById(id).disabled = isX);
   document.getElementById('editor').style.display = '';
   document.getElementById('editor').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -1649,8 +1726,7 @@ document.getElementById('clashOnly').onclick = () => {
   document.getElementById('clientType').value = 'clash';
   document.getElementById('target').value = '';
   genSub();
-  const ol3 = document.getElementById('ol3').value;
-  if (ol3) navigator.clipboard.writeText(ol3);
+  copyText(document.getElementById('ol3').value, 'stat3');
 };
 document.getElementById('genT').onclick = genTest;
 document.getElementById('toBatch').onclick = toBatch;
@@ -1658,13 +1734,12 @@ document.getElementById('toBatch').onclick = toBatch;
 /* ② 事件 */
 document.getElementById('importBtn').onclick = importNodes;
 document.getElementById('exportBtn').onclick = exportSelected;
+document.getElementById('bSni').onclick = () => applySniHostReplace(false);
+document.getElementById('bSniAll').onclick = () => applySniHostReplace(true);
 document.getElementById('sendToBatch').onclick = sendToBatch;
 document.getElementById('sendToBatch2').onclick = sendToBatch;
 document.getElementById('clashExport').onclick = exportClashYaml;
-document.getElementById('clashCopy').onclick = () => {
-  const v = document.getElementById('clashOut').value;
-  if (v) navigator.clipboard.writeText(v);
-};
+document.getElementById('clashCopy').onclick = () => copyText(document.getElementById('clashOut').value, 'clashOutStat');
 document.getElementById('clashDl').onclick = () => {
   const v = document.getElementById('clashOut').value;
   if (!v) return;
@@ -1709,6 +1784,71 @@ document.getElementById('delSel').onclick = () => {
   showStat2('<b class="ok">已删除 ' + (before - nodeList.length) + ' 条</b>' +
     '　<b class="skip">剩余 ' + nodeList.length + ' 条</b>');
 };
+/* 取节点的连接参数「有效值」：顶层属性优先，其次 path 内参数（两种写法都可能承载它）。
+   返回 '' 表示该节点压根没有这个参数——此时不参与替换，避免把空值一条条填成新值。 */
+function nodeParamValue(n, key) {
+  const top = n[key];
+  if (top !== undefined && top !== null && String(top) !== '') return String(top);
+  if (Array.isArray(n.pp)) {
+    const hit = n.pp.find(([k]) => k === key);
+    if (hit && String(hit[1] || '') !== '') return String(hit[1]);
+  }
+  return '';
+}
+
+/* 批量替换 SNI / Host（可作用于所选或全部节点） */
+function applySniHostReplace(scopeAll) {
+  const find = document.getElementById('sniFind').value;
+  const repl = document.getElementById('sniRepl').value.trim();
+  const fields = [];
+  if (document.getElementById('sniF1').checked) fields.push('sni');
+  if (document.getElementById('sniF2').checked) fields.push('host');
+  if (!fields.length) { showStat2('<b class="skip">请至少勾选一项替换范围（SNI / Host）。</b>'); return; }
+  if (!String(find).trim() && !repl) { showStat2('<b class="skip">「查找」与「替换为」不能同时为空——留空查找表示整体替换为新值。</b>'); return; }
+  const ids = selIds();
+  // 「替换全部」显式忽略勾选；「替换所选」优先勾选，没有勾选则视为全部
+  const useAll = scopeAll === true || !ids.length;
+  const targets = (useAll ? nodeList.map((_, i) => i) : ids).map(i => nodeList[i]).filter(Boolean);
+  if (!targets.length) { showStat2('<b class="skip">列表为空。</b>'); return; }
+
+  // 按替换前的有效值判断是否命中
+  const plan = [];
+  let noParam = 0;
+  for (const n of targets) {
+    const chg = {};
+    for (const key of fields) {
+      const cur = nodeParamValue(n, key);
+      if (cur === '') { noParam++; continue; }        // 本来就没有该参数 → 跳过
+      const nv = replaceValue(cur, find, repl);
+      if (String(nv) !== cur) chg[key] = nv;
+    }
+    plan.push({ n, chg });
+  }
+  const willChange = plan.filter(x => Object.keys(x.chg).length).length;
+  if (!willChange) {
+    showStat2('<b class="skip">没有节点的 SNI / Host 匹配「' + esc(String(find) || '(空)') + '」，未做改动。</b>' +
+      (noParam ? '　<b class="skip">另有 ' + noParam + ' 处节点本来就没有该参数，已跳过</b>' : '') +
+      '　<b class="skip">提示：留空「查找」表示把已有该参数的节点整体设为「替换为」</b>');
+    return;
+  }
+  const doApply = () => {
+    for (const { n, chg } of plan) {
+      if (chg.sni !== undefined) { n.sni = chg.sni; setNodeQ(n, 'sni', chg.sni); syncPathParam(n, 'sni', chg.sni); }
+      if (chg.host !== undefined) { n.host = chg.host; setNodeQ(n, 'host', chg.host); syncPathParam(n, 'host', chg.host); }
+    }
+    renderTable();
+    showStat2('<b class="ok">已替换 ' + willChange + ' 条节点</b>' +
+      fields.map(f => '　<b class="ok">' + (f === 'sni' ? 'SNI' : 'Host') + '</b>').join('') +
+      '　<b class="skip">范围：' + (useAll ? '列表全部 ' + nodeList.length + ' 条' : '勾选的 ' + ids.length + ' 条') + '</b>' +
+      (noParam ? '　<b class="skip">' + noParam + ' 处缺少该参数，已跳过</b>' : ''));
+  };
+  // 全部范围内都命中就直接执行；否则先确认
+  if (willChange === targets.length) { doApply(); return; }
+  const okGo = window.confirm('有 ' + (targets.length - willChange) + ' 条节点的 SNI / Host 匹配不到「' + String(find) + '」，它们将保持原样。\n' +
+    '其余 ' + willChange + ' 条会被替换为「' + repl + '」。\n\n继续吗？');
+  if (okGo) doApply();
+  else showStat2('<b class="skip">已取消，未做改动。</b>');
+}
 document.getElementById('bApply').onclick = () => {
   const ids = selIds();
   if (!ids.length) { showStat2('<b class="skip">请先勾选节点。</b>'); return; }
@@ -1752,29 +1892,64 @@ document.getElementById('edType').addEventListener('change', () => {
   const isX = document.getElementById('edType').value === 'xhttp';
   document.getElementById('edModeFld').style.display = isX ? '' : 'none';
   document.getElementById('edXhttpHint').style.display = isX ? '' : 'none';
-  document.getElementById('edParamsRow').style.opacity = isX ? 0.45 : 1;
+  document.getElementById('edParamsRow').classList.toggle('is-off', isX);
   ['edP','edS','edWk','edRm'].forEach(id => document.getElementById(id).disabled = isX);
 });
 document.getElementById('edSave').onclick = saveEditor;
 document.getElementById('edCancel').onclick = () => { editingIdx = -1; document.getElementById('editor').style.display = 'none'; };
-document.getElementById('edCopy').onclick = () => {
-  const l = document.getElementById('prevNew').dataset.link;
-  if (l) navigator.clipboard.writeText(l);
-};
+document.getElementById('edCopy').onclick = () => copyText(document.getElementById('prevNew').dataset.link, 'stat2');
 /* 导出 */
-document.getElementById('copyL2').onclick = () => navigator.clipboard.writeText(document.getElementById('ol2').value);
-document.getElementById('copyB2').onclick = () => navigator.clipboard.writeText(document.getElementById('ob2').value);
-document.getElementById('copyC2').onclick = () => navigator.clipboard.writeText(document.getElementById('oc2').value);
-document.getElementById('copyS2').onclick = () => navigator.clipboard.writeText(document.getElementById('os2').value);
+document.getElementById('copyL2').onclick = () => copyText(document.getElementById('ol2').value, 'stat2');
+document.getElementById('copyB2').onclick = () => copyText(document.getElementById('ob2').value, 'stat2');
+document.getElementById('copyC2').onclick = () => copyText(document.getElementById('oc2').value, 'stat2');
+document.getElementById('copyS2').onclick = () => copyText(document.getElementById('os2').value, 'stat2');
 document.getElementById('dl2').onclick = () => dl('ol2', 'nodes_managed.txt');
 function dl(srcId, name) {
   const blob = new Blob([document.getElementById(srcId).value], { type: 'text/plain' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = name; a.click();
 }
+/* 统一复制入口：navigator.clipboard 只在安全上下文（https / localhost）可用，
+   file:// 直接打开时它是 undefined，点击会抛错且没有任何反馈。
+   这里降级到 execCommand 兜底，并给出成功/失败提示。 */
+function copyText(text, statId) {
+  const note = (cls, msg) => {
+    const el = statId ? document.getElementById(statId) : null;
+    if (el) el.innerHTML = '<b class="' + cls + '">' + msg + '</b>';
+  };
+  if (!text) { note('skip', '没有可复制的内容。'); return; }
+  const fallback = () => {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.top = '-2000px';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand && document.execCommand('copy');
+      document.body.removeChild(ta);
+      note(ok ? 'ok' : 'skip', ok ? '已复制到剪贴板。' : '当前浏览器不允许自动复制，请手动选中文本复制。');
+    } catch (e) {
+      note('skip', '当前浏览器不允许自动复制，请手动选中文本复制。');
+    }
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text)
+      .then(() => note('ok', '已复制到剪贴板。'))
+      .catch(fallback);
+  } else fallback();
+}
+function bindCopy(btnId, srcId, statId) {
+  const btn = document.getElementById(btnId);
+  if (!btn) return;
+  btn.onclick = () => copyText(document.getElementById(srcId).value, statId);
+}
 /* ① 输出按钮 */
-bindCopy('copyL1', 'ol1'); bindCopy('copyB1', 'ob1'); bindCopy('copyC1', 'oc1'); bindCopy('copyS1', 'os1');
-bindCopy('copyL3', 'ol3'); bindCopy('copyC3', 'ol3'); bindCopy('copyCF1', 'ocf1');
+bindCopy('copyL1', 'ol1', 'stat1'); bindCopy('copyB1', 'ob1', 'stat1');
+bindCopy('copyC1', 'oc1', 'stat1'); bindCopy('copyS1', 'os1', 'stat1');
+bindCopy('copyL3', 'ol3', 'stat3'); bindCopy('copyC3', 'ol3', 'stat3');
+bindCopy('copyCF1', 'ocf1', 'clashFullStat');
 document.getElementById('dl1').onclick = () => dl('ol1', 'nodes_with_params.txt');
 document.getElementById('dl3').onclick = () => dl('ol3', 'sub_urls.txt');
 document.getElementById('dlCF1').onclick = () => {
@@ -1784,9 +1959,6 @@ document.getElementById('dlCF1').onclick = () => {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = 'config.yaml'; a.click();
 };
-function bindCopy(btnId, srcId) {
-  document.getElementById(btnId).onclick = () => navigator.clipboard.writeText(document.getElementById(srcId).value);
-}
 </script>
 </body>
 </html>

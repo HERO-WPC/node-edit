@@ -15,7 +15,17 @@ function mkEl(id) {
   const el = {
     id, value: '', textContent: '', innerHTML: '', checked: false, disabled: false,
     dataset: {}, style: {}, _handlers: {},
-    classList: { _s: new Set(), add(c) { this._s.add(c); }, remove(c) { this._s.delete(c); }, contains(c) { return this._s.has(c); } },
+    classList: {
+      _s: new Set(),
+      add(c) { this._s.add(c); },
+      remove(c) { this._s.delete(c); },
+      contains(c) { return this._s.has(c); },
+      toggle(c, force) {
+        const on = force === undefined ? !this._s.has(c) : !!force;
+        if (on) this._s.add(c); else this._s.delete(c);
+        return on;
+      },
+    },
     focus() {}, scrollIntoView() {},
     click() { (this._handlers.click || []).forEach(fn => fn.call(this, { target: this })); },
     appendChild() {}, addEventListener(t, fn) { (this._handlers[t] ||= []).push(fn); },
@@ -54,10 +64,12 @@ const document = {
 };
 const writes = [];
 const navigator = { clipboard: { writeText: t => { writes.push(t); return Promise.resolve(); } } };
+let confirmAnswer = true;                     // 测试里可切换的确认框返回值
+const window = { confirm: () => confirmAnswer };
 
 /* ---------------- 执行被测代码 ---------------- */
-const ctx = { document, navigator, console, atob: globalThis.atob, btoa: globalThis.btoa, Blob: class {}, URL: globalThis.URL, encodeURIComponent, decodeURIComponent };
-const api = new Function(...Object.keys(ctx), code + '\n;return {parseNode,buildNode,setNodeParams,cloneNode,classify,makeName,parseList,parseListSig,parseNodesInput,genMain,openEditor,editorToNode,updatePreview,saveEditor,exportSelected,genSub,genTest,toBatch,renderTable,getqOf,generateClashConfig,selIds,nodeList:()=>nodeList};')(...Object.values(ctx));
+const ctx = { document, navigator, console, window, atob: globalThis.atob, btoa: globalThis.btoa, Blob: class {}, URL: globalThis.URL, encodeURIComponent, decodeURIComponent };
+const api = new Function(...Object.keys(ctx), code + '\n;return {parseNode,buildNode,setNodeParams,cloneNode,classify,makeName,parseList,parseListSig,parseNodesInput,genMain,openEditor,editorToNode,updatePreview,saveEditor,exportSelected,genSub,genTest,toBatch,renderTable,getqOf,generateClashConfig,selIds,setNodeQ,syncPathParam,replaceValue,nodeList:()=>nodeList};')(...Object.values(ctx));
 
 /* ---------------- 断言 ---------------- */
 let pass = 0, fail = 0;
@@ -335,8 +347,32 @@ const before9 = writes.length;
 getEl('copyL1').onclick(); getEl('copyB1').onclick(); getEl('copyC1').onclick(); getEl('copyS1').onclick();
 getEl('copyL2').onclick(); getEl('copyB2').onclick(); getEl('copyC2').onclick(); getEl('copyS2').onclick();
 getEl('copyL3').onclick();
+// copyText 走 Promise，回调在微任务里执行
+await new Promise(r => setTimeout(r, 0));
 ok('9 个复制按钮均写入剪贴板', writes.length - before9 === 9, '实际 ' + (writes.length - before9));
 ok('复制内容非空', writes.slice(before9).every(w => w && w.length > 0));
+ok('复制成功后有反馈提示', getEl('stat2').innerHTML.includes('已复制到剪贴板'), getEl('stat2').innerHTML);
+// 非安全上下文（file:// 或 http）：navigator.clipboard 不存在，点击不得抛错
+{
+  const els2 = new Map();
+  const get2 = id => { if (!els2.has(id)) els2.set(id, mkEl(id)); return els2.get(id); };
+  const document2 = {
+    getElementById: get2,
+    querySelector: () => ({ value: 'list', checked: true, click() {} }),
+    querySelectorAll: () => [],
+    createElement: () => mkEl('d'),
+    body: { appendChild() {}, removeChild() {} },   // execCommand 兜底路径需要
+  };
+  const api2 = new Function('document', 'navigator', 'console', 'atob', 'btoa',
+    code + ';return {genMain};')(document2, {}, console, globalThis.atob, globalThis.btoa);
+  get2('nodes').value = cases[0]; get2('plist').value = '11.1.1.1';
+  get2('nameTpl').value = '{name}'; get2('existMode').value = 'keep'; get2('xhttpMode').value = 'keep'; get2('wk').value = '';
+  get2('gen1').onclick();
+  let err = null;
+  try { get2('copyL1').onclick(); get2('dl1'); } catch (e) { err = e.message; }
+  ok('无 navigator.clipboard 时复制不抛错（降级处理）', !err, '抛错：' + err);
+  ok('降级后仍给出可读提示', /已复制|不允许自动复制|没有可复制/.test(get2('stat1').innerHTML), get2('stat1').innerHTML);
+}
 
 /* ========== 10. Clash 订阅链接与完整配置 ========== */
 sec('10. Clash 订阅');
@@ -577,6 +613,104 @@ getEl('exportBtn').click();
 ok('筛选时提示说明只显示部分', getEl('stat2').innerHTML.includes('当前筛选只显示'), getEl('stat2').innerHTML);
 getEl('search').value = '';
 api.renderTable();
+
+/* ========== 14. 批量替换 SNI / Host ========== */
+sec('14. 批量替换 SNI / Host');
+// replaceValue 行为
+ok('留空查找 = 整体替换', api.replaceValue('a.old.com', '', 'cdn.new.com') === 'cdn.new.com');
+ok('子串替换（全部出现处）', api.replaceValue('a.old.com.old', 'old', 'new') === 'a.new.com.new');
+ok('* 通配匹配后缀', api.replaceValue('a.old.com', '*.old.com', 'cdn.new.com') === 'cdn.new.com');
+ok('* 通配不匹配时不改动', api.replaceValue('a.keep.com', '*.old.com', 'cdn.new.com') === 'a.keep.com');
+ok('空值整体替换可用', api.replaceValue('', '', 'cdn.new.com') === 'cdn.new.com');
+
+// 准备 3 条节点：两条 sni/host 匹配，一条不匹配
+const SNI_NODES = [
+  'vless://uuid-1@1.2.3.4:443?encryption=none&security=tls&sni=a.old.com&type=ws&host=a.old.com&path=%2Fws1#N1',
+  'vless://uuid-2@1.2.3.5:443?encryption=none&security=tls&sni=b.old.com&type=ws&host=b.old.com&path=%2Fws2#N2',
+  'vless://uuid-3@1.2.3.6:443?encryption=none&security=tls&sni=keep.com&type=ws&host=keep.com&path=%2Fws3#N3',
+];
+set('importArea', SNI_NODES.join('\n'));
+getEl('clearBtn').click();
+getEl('importBtn').click();
+ok('导入 3 条', api.nodeList().length === 3, '实际 ' + api.nodeList().length);
+
+// 只替换所选：勾选前两条
+rowchks.length = 0;
+[0, 1].forEach(i => { const c = mkEl('s' + i); c.dataset.i = String(i); c.checked = true; rowchks.push(c); });
+set('sniFind', '*.old.com'); set('sniRepl', 'cdn.new.com');
+getEl('sniF1').checked = true; getEl('sniF2').checked = true; confirmAnswer = true;
+getEl('bSni').click();
+ok('只替换勾选的两条', api.nodeList()[0].sni === 'cdn.new.com' && api.nodeList()[1].sni === 'cdn.new.com', JSON.stringify(api.nodeList().map(n => n.sni)));
+ok('未勾选的第三条不动', api.nodeList()[2].sni === 'keep.com', api.nodeList()[2].sni);
+ok('Host 同时被替换', api.nodeList()[0].host === 'cdn.new.com' && api.nodeList()[1].host === 'cdn.new.com', JSON.stringify(api.nodeList().map(n => n.host)));
+ok('query 数组已同步（链接里生效）', (() => {
+  const l = api.buildNode(api.nodeList()[0]);
+  return l.includes('sni=cdn.new.com') && l.includes('host=cdn.new.com');
+})(), api.buildNode(api.nodeList()[0]));
+ok('替换后链接可被重新解析回新值', (() => {
+  const rp = api.parseNode(api.buildNode(api.nodeList()[0]));
+  return rp.sni === 'cdn.new.com' && rp.host === 'cdn.new.com';
+})());
+ok('提示含替换条数与范围', getEl('stat2').innerHTML.includes('已替换 2 条') && getEl('stat2').innerHTML.includes('勾选的 2 条'), getEl('stat2').innerHTML);
+ok('原本 path 前缀未被破坏', api.parseNode(api.buildNode(api.nodeList()[0])).pPath === '/ws1', api.parseNode(api.buildNode(api.nodeList()[0])).pPath);
+
+// 整体替换（留空查找）作用于全部
+rowchks.length = 0;
+set('sniFind', ''); set('sniRepl', 'all.example.com');
+getEl('bSniAll').click();
+ok('替换全部：三条都变成新值', api.nodeList().every(n => n.sni === 'all.example.com' && n.host === 'all.example.com'), JSON.stringify(api.nodeList().map(n => n.sni)));
+ok('全部替换提示范围', getEl('stat2').innerHTML.includes('列表全部 3 条'), getEl('stat2').innerHTML);
+
+// 只勾 SNI 不勾 Host
+rowchks.length = 0;
+[0].forEach(i => { const c = mkEl('t' + i); c.dataset.i = String(i); c.checked = true; rowchks.push(c); });
+set('sniFind', 'all.example.com'); set('sniRepl', 'onlysni.example.com');
+getEl('sniF1').checked = true; getEl('sniF2').checked = false;
+getEl('bSni').click();
+ok('只改 SNI 时 Host 保持原值', api.nodeList()[0].sni === 'onlysni.example.com' && api.nodeList()[0].host === 'all.example.com',
+  JSON.stringify({ sni: api.nodeList()[0].sni, host: api.nodeList()[0].host }));
+
+// 校验与提示
+getEl('sniF1').checked = false; getEl('sniF2').checked = false;
+getEl('bSniAll').click();
+ok('未勾选范围时给出提示', getEl('stat2').innerHTML.includes('至少勾选一项'), getEl('stat2').innerHTML);
+getEl('sniF1').checked = true;
+set('sniFind', ''); set('sniRepl', '');
+getEl('bSniAll').click();
+ok('查找与替换同时为空时提示', getEl('stat2').innerHTML.includes('不能同时为空'), getEl('stat2').innerHTML);
+// 匹配不到时不改动
+set('sniFind', 'nope.example.com'); set('sniRepl', 'x.example.com');
+const beforeSni = api.nodeList().map(n => n.sni).join(',');
+getEl('bSniAll').click();
+ok('匹配不到时不改动任何节点', api.nodeList().map(n => n.sni).join(',') === beforeSni, api.nodeList().map(n => n.sni).join(','));
+ok('匹配不到时给出提示', getEl('stat2').innerHTML.includes('没有节点的 SNI / Host 匹配'), getEl('stat2').innerHTML);
+// 部分匹配 + 用户取消 → 不改动（勾选「会命中的第 1 条」与「不会命中的第 2 条」）
+rowchks.length = 0;
+[0, 1].forEach(i => { const c = mkEl('u' + i); c.dataset.i = String(i); c.checked = true; rowchks.push(c); });
+set('sniFind', 'onlysni.example.com'); set('sniRepl', 'changed.example.com');
+confirmAnswer = false;
+const beforeCancel = api.nodeList().map(n => n.sni).join(',');
+getEl('bSni').click();
+ok('用户取消后不做改动', api.nodeList().map(n => n.sni).join(',') === beforeCancel, api.nodeList().map(n => n.sni).join(','));
+ok('取消后有提示', getEl('stat2').innerHTML.includes('已取消'), getEl('stat2').innerHTML);
+// 确认后同样场景应生效
+confirmAnswer = true;
+getEl('bSni').click();
+ok('确认后仅命中那条被替换', api.nodeList()[0].sni === 'changed.example.com' && api.nodeList()[1].sni === 'all.example.com',
+  JSON.stringify(api.nodeList().map(n => n.sni)));
+confirmAnswer = true;
+// 带通配的 path 内参数也应同步
+set('importArea', 'vless://uuid-9@1.2.3.4:443?encryption=none&security=tls&type=ws&path=%2Fp%3Fsni%3Dold.com#P1');
+getEl('clearBtn').click();
+getEl('importBtn').click();
+rowchks.length = 0;
+set('sniFind', 'old.com'); set('sniRepl', 'new.com');
+getEl('sniF1').checked = true; getEl('sniF2').checked = false;
+getEl('bSniAll').click();
+ok('path 内的同名参数同步更新', (() => {
+  const n = api.nodeList()[0];
+  return n.pp.some(([k, v]) => k === 'sni' && v === 'new.com') && !n.pp.some(([k, v]) => k === 'sni' && v === 'old.com');
+})(), JSON.stringify(api.nodeList()[0].pp));
 
 console.log('\n================ 结果: PASS ' + pass + ' / FAIL ' + fail + ' ================');
 process.exit(fail ? 1 : 0);
