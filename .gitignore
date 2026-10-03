@@ -1,0 +1,10 @@
+# cfnew 是第三方 clone（https://github.com/byJoey/cfnew.git），
+# 仅作为本地参考，不纳入本仓库版本管理。
+cfnew/
+
+# 系统与编辑器垃圾文件
+Thumbs.db
+desktop.ini
+.DS_Store
+*.swp
+*~

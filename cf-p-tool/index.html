@@ -1,0 +1,1128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cfnew 节点管理助手</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: "Microsoft YaHei", system-ui, sans-serif; margin: 0; background: #f5f6f8; color: #222; }
+  .wrap { max-width: 1150px; margin: 0 auto; padding: 24px 16px 60px; }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  .flow { background: #fff; border: 1px solid #e3e5e8; border-radius: 10px; padding: 10px 14px;
+          font-size: 12.5px; color: #444; line-height: 1.7; margin-bottom: 14px; }
+  .flow code { background: #eef1f5; border-radius: 4px; padding: 1px 5px; font-size: 12px; }
+  .tabs { display: flex; gap: 6px; margin-bottom: -1px; position: relative; z-index: 1; flex-wrap: wrap; }
+  .tab { padding: 8px 16px; border-radius: 8px 8px 0 0; border: 1px solid #e3e5e8; border-bottom: none;
+         background: #eceef1; cursor: pointer; font-size: 13.5px; }
+  .tab.on { background: #fff; font-weight: 600; }
+  .panel { display: none; background: #fff; border: 1px solid #e3e5e8; border-radius: 0 10px 10px 10px; padding: 14px; }
+  .panel.on { display: block; }
+  .panel h2 { font-size: 14px; margin: 0 0 8px; }
+  .step { font-size: 13px; font-weight: 700; color: #2f6bff; margin: 12px 0 6px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+  @media (max-width: 800px) { .grid, .grid3 { grid-template-columns: 1fr; } }
+  textarea { width: 100%; height: 150px; font-family: Consolas, monospace; font-size: 12px;
+             border: 1px solid #d0d3d8; border-radius: 6px; padding: 8px; resize: vertical; }
+  textarea:focus { outline: 2px solid #4a7dff33; border-color: #4a7dff; }
+  input[type=text], input[type=number], select { border: 1px solid #d0d3d8; border-radius: 6px; padding: 5px 8px; font-size: 13px; }
+  .opts { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 12px 0; font-size: 13px; }
+  .opts label { display: flex; align-items: center; gap: 5px; }
+  .srcbox { border: 1px dashed #c9ced6; border-radius: 8px; padding: 10px; margin: 8px 0; }
+  .srcbox .cap { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+  .btn { background: #2f6bff; color: #fff; border: none; border-radius: 8px; padding: 9px 22px;
+         font-size: 14px; cursor: pointer; }
+  .btn:hover { background: #1f56e0; }
+  .btn.mini { font-size: 12px; padding: 5px 12px; background: #555; }
+  .btn.mini:hover { background: #333; }
+  .btn.gray { background: #8a9099; } .btn.gray:hover { background: #6d737b; }
+  .btn.warn { background: #c2620a; } .btn.warn:hover { background: #a05208; }
+  .hint { font-size: 12px; color: #888; margin-top: 4px; line-height: 1.7; }
+  .stat { font-size: 13px; margin: 10px 0 6px; line-height: 1.7; }
+  b.ok { color: #0a7d32; } b.skip { color: #c2620a; }
+  .sample { background: #f4f7ff; border-left: 3px solid #2f6bff; padding: 6px 10px; font-size: 12px;
+            font-family: Consolas, monospace; word-break: break-all; margin: 8px 0; }
+  .out textarea { height: 170px; }
+  details { margin-top: 8px; }
+  summary { cursor: pointer; font-size: 13px; color: #555; }
+  /* 节点表格 */
+  table.nl { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 8px; }
+  table.nl th, table.nl td { border-bottom: 1px solid #eceef1; padding: 6px 8px; text-align: left; word-break: break-all; }
+  table.nl th { background: #f4f6f9; font-weight: 600; }
+  table.nl tr:hover td { background: #f7f9ff; }
+  .tag { display: inline-block; background: #e8f0ff; color: #2f6bff; border-radius: 4px; padding: 1px 6px; font-size: 11px; margin-right: 4px; }
+  .tag.warn { background: #fff1e3; color: #c2620a; }
+  /* 编辑器 */
+  .editor { border: 2px solid #2f6bff33; background: #fbfcff; border-radius: 10px; padding: 14px; margin-top: 12px; }
+  .editor .fld { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: #555; }
+  .editor .fld input, .editor .fld select { font-size: 13px; }
+  .editor .row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 10px; }
+  @media (max-width: 800px) { .editor .row { grid-template-columns: 1fr 1fr; } }
+  .editor h3 { font-size: 13px; margin: 12px 0 8px; color: #2f6bff; }
+  .prev { font-family: Consolas, monospace; font-size: 11.5px; word-break: break-all; background: #f4f7ff;
+          border-left: 3px solid #2f6bff; padding: 6px 10px; margin: 6px 0; }
+  .prev.old { background: #f5f5f5; border-left-color: #999; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>cfnew 节点管理助手</h1>
+
+  <div class="flow">
+    <b>原理：</b>客户端连接<b>入口优选IP</b>（节点 @ 后地址）→ CF 边缘 → Worker ── 优先<b>直连</b>目标；<b>直连失败</b>才走 <code>p</code>（ProxyIP 反代）或 <code>s</code>（SOCKS5/HTTP 代理）。
+    工具内部把节点解析为对象再改参数、重建 URI（<code>p/s/wk/rm</code> 写入 path 随连接生效，优先级高于面板/环境变量）。仅支持 VLESS / Trojan（WS、XHTTP）。
+  </div>
+
+  <div class="tabs">
+    <div class="tab on" data-t="1">① 批量生成参数节点</div>
+    <div class="tab" data-t="2">② 节点管理与编辑</div>
+    <div class="tab" data-t="3">③ 订阅参数生成</div>
+    <div class="tab" data-t="4">④ ProxyIP 测试辅助</div>
+  </div>
+
+  <!-- ==================== ① 批量生成 ==================== -->
+  <div class="panel on" id="p1">
+    <div class="step">用途（三选一）</div>
+    <div class="opts" style="margin-top:0">
+      <label><input type="radio" name="src" value="list" checked> 批量测试 ProxyIP</label>
+      <label><input type="radio" name="src" value="line"> 固定节点出口</label>
+      <label><input type="radio" name="src" value="self"> 入口 IP 自动作为 ProxyIP</label>
+    </div>
+
+    <div id="listBox">
+      <div class="srcbox">
+        <div class="cap" id="listCap">每条节点 × 每行 ProxyIP 全组合输出 —— 铺开测速找最快反代</div>
+        <div class="grid">
+          <div id="colNodes">
+            <h2>节点链接</h2>
+            <textarea id="nodes" placeholder="每行一条 vless:// 或 trojan://，也支持整段 base64 订阅（自动识别）"></textarea>
+          </div>
+          <div id="colList">
+            <h2>ProxyIP 列表（每行一个）</h2>
+            <textarea id="plist" placeholder="1.2.3.4&#10;1.2.3.4:8443 #HK&#10;proxy.example.com&#10;socks5://user:pass@host:port&#10;http://host:port"></textarea>
+            <div class="hint">自动识别：带 <code>socks5://</code>/<code>http(s)://</code> 前缀或含账号（@）的归为 <b>s 代理</b>，其余归为 <b>p 反代</b>；<code>#HK</code> 备注用于命名。</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="lineBox" style="display:none">
+      <div class="srcbox">
+        <div class="cap">每行「节点 | 出口」，精确配对，不做组合</div>
+        <textarea id="pairs" placeholder="vless://...#HK-01 | 1.2.3.4:8443 #HK&#10;trojan://...#TJ | socks5://user:pass@5.6.7.8:1080&#10;vless://...#mix | p=9.9.9.9&wk=JP&rm=no&#10;vless://...#keep （出口留空 = 保持原样）" style="height:140px"></textarea>
+        <div class="hint">分隔符 <code>|</code> 或空格。出口可直接给值（自动识别 p/s）或键值 <code>p=…&amp;wk=…&amp;rm=no</code>；<code>#备注</code> 用于命名。</div>
+      </div>
+    </div>
+
+    <div class="step">选项</div>
+    <div class="opts" style="margin-top:0">
+      <label>命名模板 <input type="text" id="nameTpl" value="{name}-{r}-{i}" style="width:170px" title="{name}=原名 {r}=备注 {v}=参数值 {i}=IP(不含端口) {port}=端口"></label>
+      <label>已有参数
+        <select id="existMode"><option value="keep" selected>保留</option><option value="overwrite">覆盖</option><option value="multi">生成两个版本</option></select></label>
+      <label>xhttp 节点
+        <select id="xhttpMode"><option value="keep" selected>保留原样</option><option value="skip">跳过</option></select></label>
+      <label>wk <input type="text" id="wk" placeholder="如 HK" style="width:64px"></label>
+      <label><input type="checkbox" id="rmno"> rm=no</label>
+    </div>
+
+    <button class="btn" id="gen1">生成节点</button>
+    <div class="stat" id="stat1"></div>
+    <div class="out" id="out1" style="display:none">
+      <h2>输出
+        <button class="btn mini" id="copyL1">复制节点</button>
+        <button class="btn mini" id="copyB1">复制 base64</button>
+        <button class="btn mini" id="copyC1">复制 Clash</button>
+        <button class="btn mini" id="copyS1">复制 sing-box</button>
+        <button class="btn mini" id="dl1">下载 .txt</button>
+      </h2>
+      <div class="sample" id="sample1"></div>
+      <textarea id="ol1" spellcheck="false"></textarea>
+      <details><summary>base64 订阅</summary><textarea id="ob1" spellcheck="false" style="height:90px"></textarea></details>
+      <details><summary>Clash / mihomo 配置片段（proxies:）</summary><textarea id="oc1" spellcheck="false" style="height:150px"></textarea></details>
+      <details><summary>sing-box 配置片段（outbounds:）</summary><textarea id="os1" spellcheck="false" style="height:150px"></textarea></details>
+    </div>
+  </div>
+
+  <!-- ==================== ② 节点管理与编辑 ==================== -->
+  <div class="panel" id="p2">
+    <div class="step">导入节点</div>
+    <div class="grid">
+      <div>
+        <textarea id="importArea" placeholder="粘贴 vless:// trojan:// 链接（多行）或整段 base64 订阅，点「导入」" style="height:90px"></textarea>
+      </div>
+      <div class="opts" style="align-content:flex-start">
+        <button class="btn" id="importBtn">导入节点</button>
+        <button class="btn gray" id="clearBtn">清空列表</button>
+        <span class="hint">重复导入会按链接去重。仅解析 VLESS / Trojan。</span>
+      </div>
+    </div>
+
+    <div class="step">节点列表</div>
+    <div class="opts" style="margin:0 0 4px">
+      <input type="text" id="search" placeholder="搜索名称/地址…" style="width:180px">
+      <select id="fProto"><option value="">全部协议</option><option value="vless">VLESS</option><option value="trojan">Trojan</option></select>
+      <select id="fTrans"><option value="">全部传输</option><option value="ws">WS</option><option value="xhttp">XHTTP</option></select>
+      <button class="btn mini" id="selAll">全选/反选</button>
+      <button class="btn mini warn" id="delSel">删除所选</button>
+      <span class="hint" id="listCount"></span>
+    </div>
+
+    <div style="overflow-x:auto">
+      <table class="nl" id="nodeTable">
+        <thead><tr>
+          <th style="width:30px"><input type="checkbox" id="chkHead"></th>
+          <th>名称</th><th>协议</th><th>传输</th><th>地址</th><th>cfnew 参数</th><th style="width:110px">操作</th>
+        </tr></thead>
+        <tbody id="nodeBody"></tbody>
+      </table>
+    </div>
+
+    <div class="srcbox" id="batchBox" style="margin-top:12px">
+      <div class="cap">批量修改所选节点参数</div>
+      <div class="opts" style="margin:4px 0">
+        <label>ProxyIP(p) <input type="text" id="bP" placeholder="1.2.3.4:443" style="width:150px"></label>
+        <label>SOCKS/HTTP(s) <input type="text" id="bS" placeholder="socks5://u:p@h:1080" style="width:170px"></label>
+        <label>wk <input type="text" id="bWk" style="width:60px"></label>
+        <label><input type="checkbox" id="bRm"> rm=no</label>
+        <label>已有参数
+          <select id="bExist"><option value="keep" selected>保留</option><option value="overwrite">覆盖</option><option value="copy">复制新节点</option></select></label>
+        <button class="btn mini" id="bApply">应用到所选</button>
+      </div>
+    </div>
+
+    <!-- 编辑器 -->
+    <div class="editor" id="editor" style="display:none">
+      <h2 style="color:#2f6bff">编辑节点：<span id="edTitle"></span></h2>
+      <h3>基础信息</h3>
+      <div class="row">
+        <div class="fld">节点名称<input type="text" id="edName"></div>
+        <div class="fld">协议<select id="edProto"><option value="vless">VLESS</option><option value="trojan">Trojan</option></select></div>
+        <div class="fld">服务器地址<input type="text" id="edServer"></div>
+        <div class="fld">端口<input type="number" id="edPort" min="1" max="65535"></div>
+      </div>
+      <div class="row">
+        <div class="fld">UUID / Trojan密码<input type="text" id="edAuth"></div>
+        <div class="fld">SNI<input type="text" id="edSni"></div>
+        <div class="fld">Host<input type="text" id="edHost"></div>
+        <div class="fld">TLS<select id="edSec"><option value="tls">tls</option><option value="none">none（明文）</option></select></div>
+      </div>
+      <h3>传输设置</h3>
+      <div class="row">
+        <div class="fld">传输类型<select id="edType"><option value="ws">WebSocket</option><option value="xhttp">XHTTP</option></select></div>
+        <div class="fld">Path<input type="text" id="edPath"></div>
+        <div class="fld" id="edModeFld" style="display:none">Mode<input type="text" id="edMode" placeholder="stream-one"></div>
+        <div class="fld">fp（指纹）<input type="text" id="edFp" placeholder="chrome"></div>
+      </div>
+      <div class="hint" id="edXhttpHint" style="display:none; color:#c2620a">
+        ⚠ XHTTP 节点不建议通过 path 注入 cfnew 连接参数（Worker 不读取）——推荐使用「③ 订阅参数生成」管理出口；
+        此处仅修改基础信息，参数区已禁用。
+      </div>
+      <h3>cfnew 连接参数（写入 path）</h3>
+      <div class="row" id="edParamsRow">
+        <div class="fld">ProxyIP（p）<input type="text" id="edP" placeholder="1.2.3.4:443"></div>
+        <div class="fld">SOCKS/HTTP（s）<input type="text" id="edS" placeholder="socks5://u:p@h:1080"></div>
+        <div class="fld">Worker地区（wk）<input type="text" id="edWk" placeholder="HK"></div>
+        <div class="fld">地区匹配<input type="checkbox" id="edRm"> <span>rm=no（关闭）</span></div>
+      </div>
+      <div class="opts" id="edConflictRow">
+        <label>与已有参数冲突时
+          <select id="edExist"><option value="keep" selected>保留旧参数</option><option value="overwrite">覆盖旧参数</option><option value="copy">复制生成新节点</option></select></label>
+      </div>
+      <h3>实时预览</h3>
+      <div class="prev old" id="prevOld"></div>
+      <div class="prev" id="prevNew"></div>
+      <div class="prev" id="prevPath" style="background:#f0fff4;border-left-color:#0a7d32"></div>
+      <div class="prev" id="prevEnc" style="background:#f0fff4;border-left-color:#0a7d32;font-size:11px;color:#555"></div>
+      <div class="opts">
+        <button class="btn" id="edSave">保存修改</button>
+        <button class="btn gray" id="edCopy">复制修改后链接</button>
+        <button class="btn gray" id="edCancel">取消</button>
+      </div>
+    </div>
+
+    <div class="stat" id="stat2"></div>
+    <div class="out" id="out2" style="display:none">
+      <h2>导出所选
+        <button class="btn mini" id="copyL2">复制链接</button>
+        <button class="btn mini" id="copyB2">复制 base64</button>
+        <button class="btn mini" id="copyC2">复制 Clash</button>
+        <button class="btn mini" id="copyS2">复制 sing-box</button>
+        <button class="btn mini" id="dl2">下载 .txt</button>
+      </h2>
+      <textarea id="ol2" spellcheck="false"></textarea>
+      <details><summary>base64 订阅</summary><textarea id="ob2" spellcheck="false" style="height:90px"></textarea></details>
+      <details><summary>Clash 配置片段</summary><textarea id="oc2" spellcheck="false" style="height:150px"></textarea></details>
+      <details><summary>sing-box 配置片段</summary><textarea id="os2" spellcheck="false" style="height:150px"></textarea></details>
+    </div>
+  </div>
+
+  <!-- ==================== ③ 订阅参数 ==================== -->
+  <div class="panel" id="p3">
+    <div class="grid">
+      <div>
+        <h2>订阅基地址（每行一条）</h2>
+        <textarea id="subs" placeholder="https://你的worker域名/你的UUID/sub" style="height:110px"></textarea>
+      </div>
+      <div>
+        <h2>参数列表（每行一个，可带标签）</h2>
+        <textarea id="plist3" placeholder="1.1.1.1 #HK&#10;2.2.2.2 #US&#10;或：HK | p=1.1.1.1&#10;或：US | p=2.2.2.2&target=clash" style="height:110px"></textarea>
+        <div class="hint">三种写法：<code>1.1.1.1 #HK</code>（自动识别 p/s，用备注当标签）、<code>HK | p=1.1.1.1</code>（显式指定键）、<code>US | p=2.2.2.2&amp;wk=JP</code>（可带附加参数）。</div>
+      </div>
+    </div>
+    <div class="opts">
+      <b>参数类型：</b>
+      <select id="pkey3">
+        <option value="auto" selected>自动识别（p / s）</option>
+        <option value="p">p 反代IP</option><option value="s">s SOCKS5代理</option>
+        <option value="wk">wk 地区筛选</option><option value="rm">rm 移除地区</option>
+      </select>
+      <label>target <input type="text" id="target" placeholder="clash / singbox / surge…" style="width:130px"></label>
+    </div>
+    <div class="hint" style="margin:-4px 0 10px">订阅层 <code>wk</code>=只输出指定地区优选、<code>rm</code>=移除地区（与节点层含义不同）。订阅模式对 xhttp 节点同样有效。</div>
+    <button class="btn" id="gen3">生成订阅链接</button>
+    <div class="stat" id="stat3"></div>
+    <div class="out" id="out3" style="display:none">
+      <h2>输出
+        <button class="btn mini" id="copyL3">复制</button>
+        <button class="btn mini" id="dl3">下载 .txt</button>
+      </h2>
+      <textarea id="ol3" spellcheck="false"></textarea>
+    </div>
+  </div>
+
+  <!-- ==================== ④ ProxyIP 测试辅助 ==================== -->
+  <div class="panel" id="p4">
+    <div class="grid">
+      <div>
+        <h2>ProxyIP 列表</h2>
+        <textarea id="tplist" placeholder="1.2.3.4:443 #HK&#10;5.6.7.8:8443 #US&#10;（每行一个，#备注为地区/名称）" style="height:150px"></textarea>
+      </div>
+      <div>
+        <h2>输出</h2>
+        <div class="fld" style="font-size:12px;color:#555">① 纯 ip:port 列表（喂给 CloudflareSpeedTest / tcping）</div>
+        <textarea id="tIps" style="height:90px" spellcheck="false"></textarea>
+        <div class="fld" style="font-size:12px;color:#555;margin-top:6px">② 名称对照表（名称 ⇄ ip:port）</div>
+        <textarea id="tNames" style="height:90px" spellcheck="false"></textarea>
+      </div>
+    </div>
+    <div class="opts">
+      <label>名称前缀 <input type="text" id="tPrefix" value="CF" style="width:80px"></label>
+      <button class="btn" id="genT">整理列表</button>
+      <button class="btn gray" id="toBatch">用这些 IP 去批量生成测试节点 →</button>
+    </div>
+    <div class="hint">测速流程：整理列表 → 复制①去测速 → 回「① 批量生成」按速度选 ProxyIP → 用 <code>#地区</code> 备注自动命名，客户端里按名字对比。</div>
+  </div>
+
+  <details class="hint" style="margin-top:18px">
+    <summary>参数详解（源码依据：cfnew「明文源吗」第 3323–3331 行 WS 处理函数、第 4185 行 解析代理配置）</summary>
+    <p><b>p</b>：出站 ProxyIP，直连失败时改走。支持 ip、ip:端口、[IPv6]:端口、域名，可逗号分隔多个。</p>
+    <p><b>s</b>：出站代理，接受 <code>socks5://</code>/<code>socks://</code>/<code>http://</code>/<code>https://</code> 前缀或裸 <code>user:pass@host:port</code>（无前缀按 SOCKS5）。</p>
+    <p><b>wk</b>（节点层）：Worker 地区，影响分区回退；<b>订阅层</b>为筛选优选地区。<b>rm</b>（节点层）：仅 rm=no 有效；<b>订阅层</b>为移除地区。</p>
+    <p>XHTTP 节点的连接参数 Worker 不读取，出口请用「③ 订阅参数生成」管理。</p>
+  </details>
+</div>
+
+<script>
+/* ============================================================
+   核心对象模型：link ⇄ node 对象（不直接改字符串）
+   ============================================================ */
+const MODELED = ['type','security','sni','host','fp','alpn','mode','extra','path'];
+function dec(s){ try { return decodeURIComponent(s); } catch(e){ return s; } }
+
+function parseNode(link) {
+  const h = link.indexOf('#');
+  const name = h > -1 ? dec(link.slice(h + 1)) : '';
+  let main = h > -1 ? link.slice(0, h) : link;
+  const qm = main.indexOf('?');
+  const queryStr = qm > -1 ? main.slice(qm + 1) : '';
+  const base = qm > -1 ? main.slice(0, qm) : main;
+  const scheme = base.slice(0, base.indexOf(':')).toLowerCase();
+  const rest = base.slice(base.indexOf('//') + 2);
+  const at = rest.lastIndexOf('@');
+  const auth = at > -1 ? dec(rest.slice(0, at)) : '';
+  const hostport = at > -1 ? rest.slice(at + 1) : rest;
+  const pm = hostport.match(/^(.+):(\d+)$/);
+  let server = pm ? pm[1] : hostport;
+  const port = pm ? parseInt(pm[2], 10) : 443;
+  if (server.startsWith('[') && server.endsWith(']')) server = server.slice(1, -1);
+
+  const q = [];
+  for (const kv of queryStr.split('&')) {
+    if (!kv) continue;
+    const eq = kv.indexOf('=');
+    q.push([kv.slice(0, eq), eq > -1 ? kv.slice(eq + 1) : '']);
+  }
+  const getq = k => { const e = q.find(p => p[0] === k); return e === undefined ? undefined : dec(e[1]); };
+
+  // path → pPath + pp（path 内 query，连接参数通常住这里）
+  let pPath = null, pp = [];
+  const pathRaw = getq('path');
+  if (pathRaw !== undefined) {
+    const pi = pathRaw.indexOf('?');
+    pPath = pi > -1 ? pathRaw.slice(0, pi) : pathRaw;
+    if (pi > -1) for (const kv of pathRaw.slice(pi + 1).split('&')) {
+      if (!kv) continue;
+      const eq = kv.indexOf('=');
+      pp.push([kv.slice(0, eq), eq > -1 ? dec(kv.slice(eq + 1)) : '']);
+    }
+  }
+  // cfnew 也接受把连接参数直接写在节点 query 上（?p=…&s=…），不能丢；
+  // path 内已有的同名参数优先，其余按原顺序追加。
+  for (const k of ['p', 's', 'wk', 'rm']) {
+    if (pp.some(([x]) => x === k)) continue;
+    const v = getq(k);
+    if (v !== undefined && v !== '') pp.push([k, v]);
+  }
+  return {
+    scheme, auth, server, port, name, q, raw: link,
+    type: getq('type') || '', security: getq('security') || '',
+    sni: getq('sni') || '', host: getq('host') || '', fp: getq('fp') || '',
+    alpn: getq('alpn') || '', mode: getq('mode') || '', extra: getq('extra') || '',
+    pPath, pp
+  };
+}
+
+/* path 整体是作为节点 query 的一个「值」写出去的，只需转义会破坏 query 结构的字符。
+   参数值里已经存在的 %XX（如 socks5%3A%2F%2F…）必须原样保留，
+   否则整个 path 再走一次 encodeURIComponent 会把 % 编成 %25，产生双重编码。 */
+function encPathValue(s) {
+  const hold = [];
+  const protectedStr = String(s).replace(/%[0-9A-Fa-f]{2}/g, m => { hold.push(m); return '\u0001' + (hold.length - 1) + '\u0002'; });
+  const out = protectedStr
+    .replace(/%/g, '%25').replace(/&/g, '%26').replace(/=/g, '%3D')
+    .replace(/\?/g, '%3F').replace(/#/g, '%23').replace(/\+/g, '%2B')
+    .replace(/\//g, '%2F');
+  return out.replace(/\u0001(\d+)\u0002/g, (_, i) => hold[+i]);
+}
+
+function buildNode(n) {
+  let pathVal = null;
+  if (n.pPath !== null) {
+    const qs = n.pp.map(([k, v]) => k + '=' + encodeURIComponent(v)).join('&');
+    pathVal = n.pPath + (qs ? '?' + qs : '');
+  }
+  const enc = encodeURIComponent;
+  const parts = [];
+  for (const [k, raw] of n.q) {
+    let v = raw;
+    if (k === 'type') v = enc(n.type);
+    else if (k === 'security') v = enc(n.security);
+    else if (k === 'sni') v = enc(n.sni);
+    else if (k === 'host') v = enc(n.host);
+    else if (k === 'fp') v = enc(n.fp);
+    else if (k === 'alpn') v = n.alpn ? enc(n.alpn) : null;
+    else if (k === 'mode') v = n.mode ? enc(n.mode) : null;
+    else if (k === 'extra') v = n.extra ? enc(n.extra) : null;
+    else if (k === 'path') v = pathVal !== null ? encPathValue(pathVal) : null;
+    if (v !== null && v !== undefined && v !== '') parts.push(k + '=' + v);
+  }
+  const sp = n.server.includes(':') ? '[' + n.server + ']' : n.server;
+  let u = n.scheme + '://' + enc(n.auth) + '@' + sp + ':' + n.port;
+  if (parts.length) u += '?' + parts.join('&');
+  if (n.name) u += '#' + enc(n.name);
+  return u;
+}
+
+/* 在节点对象上设置连接参数（p/s/wk/rm），existMode: keep|overwrite；返回冲突键 */
+function setNodeParams(n, params, existMode) {
+  const conflicts = [];
+  if (n.pPath === null) n.pPath = '/';
+  for (const [k, v] of params) {
+    if (v === '' || v == null) continue;
+    const i = n.pp.findIndex(p => p[0] === k);
+    if (i > -1) {
+      if (existMode === 'keep') { conflicts.push(k); continue; }
+      n.pp[i][1] = v;
+    } else n.pp.push([k, v]);
+  }
+  return conflicts;
+}
+function cloneNode(n) {
+  return Object.assign({}, n, { q: n.q.map(x => [x[0], x[1]]), pp: n.pp.map(x => [x[0], x[1]]) });
+}
+function nodeParamStr(n) {
+  return n.pp.filter(([k]) => ['p','s','wk','rm'].includes(k)).map(([k,v]) => k + '=' + v).join('  ') || '无';
+}
+
+/* 自动识别 p / s（Worker 端接受 socks5:// socks:// http:// https:// 或裸 user:pass@host:port） */
+function classify(v) {
+  const low = v.toLowerCase();
+  if (/^(socks5|socks|https?):\/\//.test(low)) return 's';
+  if (v.includes('@') && !/^\[?[0-9a-f.:]+\]?(:\d+)?$/i.test(v)) return 's';
+  return 'p';
+}
+
+/* 命名模板：{name} {r} {v} {i} {port} */
+function makeName(origName, tpl, value, remark) {
+  let port = '';
+  let ip = value;
+  const m = value.match(/^(.*):(\d+)$/);
+  if (m && !value.includes(']')) { ip = m[1]; port = m[2]; }
+  let s = (tpl || '{name}-{r}-{i}')
+    .replace(/\{name\}/g, origName || '节点')
+    .replace(/\{r\}/g, remark || '')
+    .replace(/\{v\}/g, value)
+    .replace(/\{i\}/g, ip)
+    .replace(/\{port\}/g, port)
+    .replace(/-{2,}/g, '-').replace(/^-+|-+$/g, '');
+  return s || origName || value;
+}
+
+/* ---------- 列表解析/基础工具 ---------- */
+function parseList(text) {
+  const out = [], seen = new Set();
+  for (const raw of text.split('\n')) {
+    let line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    let remark = '';
+    const h = line.indexOf('#');
+    if (h > -1) { remark = line.slice(h + 1).trim(); line = line.slice(0, h).trim(); }
+    if (!line || seen.has(line)) continue;
+    seen.add(line);
+    out.push({ value: line, remark });
+  }
+  return out;
+}
+/* 参数列表解析（每行一个，支持「标签 | 参数」写法）：
+   1.1.1.1 #HK           → 值 1.1.1.1，标签 HK
+   HK | p=1.1.1.1        → 标签 HK，显式键 p，值 1.1.1.1
+   US | p=2.2.2.2&target=clash → 标签 US，参数 p=2.2.2.2，附加 target=clash */
+function parseListSig(text) {
+  const out = [], seen = new Set();
+  for (const raw of text.split('\n')) {
+    let line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    let remark = '', key = '', extra = [];
+    const h = line.indexOf('#');
+    if (h > -1) { remark = line.slice(h + 1).trim(); line = line.slice(0, h).trim(); }
+    const bar = line.indexOf('|');
+    if (bar > -1) {                       // 「标签 | 参数」写法
+      remark = line.slice(0, bar).trim() || remark;
+      line = line.slice(bar + 1).trim();
+    }
+    const eq = line.indexOf('=');
+    if (eq > 0) {                         // 显式键值：p=1.1.1.1&wk=HK
+      const parts = line.split('&').filter(Boolean);
+      const valOf = kv => { const i = kv.indexOf('='); return i > -1 ? kv.slice(i + 1).trim() : ''; };
+      for (const kv of parts) {
+        const i = kv.indexOf('=');
+        if (i <= 0) continue;
+        const k = kv.slice(0, i).trim();
+        if (k === 'p' || k === 's') { if (key === '') key = k; }
+        else if (k === 'wk' || k === 'rm') { /* 与「wk/rm」下拉框同义的附加参数，仅保留在 extra */ }
+        extra.push([k, valOf(kv)]);
+      }
+      line = valOf(parts[0]);
+    }
+    if (!line) continue;
+    const sig = key + '\u0000' + line;
+    if (seen.has(sig)) continue;
+    seen.add(sig);
+    out.push({ value: line, remark: remark || line, key, extra });
+  }
+  return out;
+}
+function parseNodesInput(text) {
+  let t = text.trim();
+  if (t && !t.includes('://')) {
+    try {
+      const d = atob(t.replace(/-/g, '+').replace(/_/g, '/').replace(/\s+/g, ''));
+      if (d.includes('://')) t = d;
+    } catch (e) {}
+  }
+  return t.split('\n').map(s => s.trim()).filter(Boolean);
+}
+function toB64(s) { return btoa(unescape(encodeURIComponent(s))); }
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function fixedParams() {
+  const p = [];
+  const wk = document.getElementById('wk').value.trim();
+  if (wk) p.push(['wk', wk.toUpperCase()]);
+  if (document.getElementById('rmno').checked) p.push(['rm', 'no']);
+  return p;
+}
+
+/* ---------- Clash / sing-box 转换（基于节点对象） ---------- */
+function nodeToClashObj(n) {
+  const tls = n.security === 'tls';
+  const o = { name: n.name || (n.server + ':' + n.port), type: n.scheme, server: n.server, port: n.port,
+              tls, network: n.type };
+  if (n.scheme === 'vless') { o.uuid = n.auth; o.udp = true; } else o.password = n.auth;
+  if (tls) o.servername = n.sni || n.host;
+  if (n.fp) o['client-fingerprint'] = n.fp;
+  if (n.alpn) o.alpn = n.alpn.split(',').map(s => s.trim());
+  if (n.type === 'ws') {
+    o['ws-opts'] = Object.assign({ path: n.pPath !== null ? (n.pPath + (n.pp.length ? '?' + n.pp.map(([k,v]) => k + '=' + encodeURIComponent(v)).join('&') : '')) : '/' },
+      n.host ? { headers: { Host: n.host } } : {});
+  } else return null; // 仅 ws
+  return o;
+}
+function clashObjsToYaml(objs) {
+  const blocks = [];
+  for (const o of objs) {
+    const L = ['- name: ' + yq(o.name), '  type: ' + o.type, '  server: ' + o.server, '  port: ' + o.port];
+    if (o.uuid) { L.push('  uuid: ' + o.uuid); L.push('  udp: true'); } else L.push('  password: ' + yq(o.password));
+    L.push('  tls: ' + o.tls);
+    if (o.tls && o.servername) L.push('  servername: ' + yq(o.servername));
+    if (o['client-fingerprint']) L.push('  client-fingerprint: ' + o['client-fingerprint']);
+    if (o.alpn) L.push('  alpn: [' + o.alpn.map(yq).join(', ') + ']');
+    L.push('  network: ' + o.network);
+    L.push('  ws-opts:');
+    L.push('    path: ' + yq(o['ws-opts'].path));
+    if (o['ws-opts'].headers) { L.push('    headers:'); L.push('      Host: ' + yq(o['ws-opts'].headers.Host)); }
+    blocks.push(L.join('\n'));
+  }
+  return blocks.join('\n');
+}
+function yq(v) { return '"' + String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"'; }
+function nodesToClash(nodes) {
+  const objs = nodes.map(nodeToClashObj).filter(Boolean);
+  return { text: clashObjsToYaml(objs), skipped: nodes.length - objs.length };
+}
+function nodesToSingbox(nodes) {
+  const out = [];
+  for (const n of nodes) {
+    if (n.type !== 'ws') continue;
+    const tls = n.security === 'tls';
+    const o = { type: n.scheme, tag: n.name || (n.server + ':' + n.port), server: n.server, server_port: n.port };
+    if (n.scheme === 'vless') o.uuid = n.auth; else o.password = n.auth;
+    if (tls) {
+      o.tls = { enabled: true, server_name: n.sni || n.host || n.server };
+      if (n.fp) o.tls.utls = { enabled: true, fingerprint: n.fp };
+      if (n.alpn) o.tls.alpn = n.alpn.split(',').map(s => s.trim());
+    }
+    const pathQ = n.pPath !== null ? (n.pPath + (n.pp.length ? '?' + n.pp.map(([k,v]) => k + '=' + encodeURIComponent(v)).join('&') : '')) : '/';
+    o.transport = { type: 'ws', path: pathQ };
+    if (n.host) o.transport.headers = { Host: n.host };
+    out.push(o);
+  }
+  return { text: JSON.stringify(out, null, 2), skipped: nodes.length - out.length };
+}
+
+/* ============================================================
+   ① 批量生成参数节点
+   ============================================================ */
+function genMain() {
+  const src = document.querySelector('input[name=src]:checked').value;
+  const tpl = document.getElementById('nameTpl').value;
+  const existMode = document.getElementById('existMode').value;
+  const xhttpMode = document.getElementById('xhttpMode').value;
+  const fixed = fixedParams();
+  const stat = document.getElementById('stat1'), out = document.getElementById('out1');
+  const results = [], skipped = [], multiNote = [];
+  let n = 0;
+  let changed = 0;   // multi 模式实际产生冲突的次数
+  const genOne = (node, params, newName) => {
+    const actualParams = params.filter(([k]) => !fixed.some(([x]) => x === k));
+    const fixedWrite = params.filter(([k]) => fixed.some(([x]) => x === k));
+    if (existMode === 'multi') {
+      // 仅「同名且值不同」才算冲突：冲突时原节点保留原名，每个冲突参数各生成一个版本；
+      // 固定选项（wk/rm）属于公共设置，直接合入各版本，不单独复制。
+      const conflicts = actualParams.filter(([k, v]) => node.pp.some(([x, ov]) => x === k && ov !== v));
+      if (conflicts.length) {
+        changed += conflicts.length;
+        const links = [node.raw];
+        for (const [k] of conflicts) {
+          const copy = cloneNode(node);
+          setNodeParams(copy, [...actualParams.filter(([x]) => x === k), ...fixedWrite], 'overwrite');
+          copy.name = makeName(node.name, tpl, params[0][1], '');
+          links.push(buildNode(copy));
+        }
+        multiNote.push((node.name || node.server) + ':' + conflicts.map(([k]) => k).join('/'));
+        return links;
+      }
+      const single = cloneNode(node);
+      setNodeParams(single, params, 'overwrite');
+      single.name = newName;
+      return [buildNode(single)];
+    }
+    const built = cloneNode(node);
+    const conflicts = setNodeParams(built, params, existMode);
+    built.name = newName;
+    if (conflicts.length) multiNote.push(newName + ':' + conflicts.join('/'));
+    return [buildNode(built)];
+  };
+  const isX = n => n.type === 'xhttp' || n.type === 'splithttp';
+
+  if (src === 'list' || src === 'self') {
+    const lines = parseNodesInput(document.getElementById('nodes').value);
+    const parsed = [], unsupported = [];
+    for (const l of lines) {
+      const sch = l.slice(0, l.indexOf(':')).toLowerCase();
+      if (sch === 'vless' || sch === 'trojan') parsed.push(parseNode(l)); else unsupported.push(l.slice(0, 30));
+    }
+    const self = src === 'self';
+    const list = self ? [] : parseList(document.getElementById('plist').value);
+    if (!parsed.length || (!self && !list.length)) {
+      stat.innerHTML = '<b class="skip">请填入节点' + (self ? '' : '和 ProxyIP 列表') + '。</b>' +
+        (unsupported.length ? '<b class="skip">　忽略非 VLESS/Trojan ' + unsupported.length + ' 行</b>' : '');
+      out.style.display = 'none'; return;
+    }
+    let skippedX = 0;
+    for (const node of parsed) {
+      if (isX(node)) {
+        if (xhttpMode === 'keep') { results.push(node.raw); n++; } else skippedX++;
+        continue;
+      }
+      const items = self ? [{ value: (node.server.includes(':') ? '[' + node.server + ']' : node.server) + ':' + node.port, remark: '' }] : list;
+      for (const item of items) {
+        if (!item.value) { skippedX++; continue; }
+        const key = self ? 'p' : classify(item.value);
+        const newName = makeName(node.name, tpl, item.value, item.remark);
+        const made = genOne(node, [[key, item.value], ...fixed], newName);
+        results.push(...made);
+        n += made.length;
+      }
+    }
+    stat.innerHTML = '<b class="ok">' + (self
+        ? parsed.length + ' 条节点 → 各自以入口 IP:端口 作为 ProxyIP，生成 ' + n + ' 条'
+        : parsed.length + ' 条节点 × ' + list.length + ' 个 ProxyIP → ' + n + ' 条') + '</b>' +
+      (skippedX ? '　<b class="skip">xhttp/无地址 ' + skippedX + ' 条</b>' : '') +
+      (unsupported.length ? '　<b class="skip">非 VLESS/Trojan ' + unsupported.length + ' 行</b>' : '');
+  } else {
+    const lines = document.getElementById('pairs').value.split('\n');
+    let kept = 0, bad = [];
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line) continue;
+      let link = line, spec = '';
+      const bar = line.indexOf('|');
+      if (bar > -1) { link = line.slice(0, bar).trim(); spec = line.slice(bar + 1).trim(); }
+      else { const m = link.match(/^(\S+)\s+([\s\S]+)$/); if (m) { link = m[1]; spec = m[2].trim(); } }
+      const sch = link.slice(0, link.indexOf(':')).toLowerCase();
+      if (sch !== 'vless' && sch !== 'trojan') { bad.push(line.slice(0, 30)); continue; }
+      const node = parseNode(link);
+      if (!spec) { results.push(node.raw); kept++; n++; continue; }
+      if (isX(node)) {
+        if (xhttpMode === 'keep') { results.push(node.raw); kept++; n++; }
+        else bad.push('xhttp: ' + (node.name || node.server));
+        continue;
+      }
+      let remark = '';
+      const hIdx = spec.indexOf('#');
+      if (hIdx > -1) { remark = spec.slice(hIdx + 1).trim(); spec = spec.slice(0, hIdx).trim(); }
+      const params = [];
+      if (spec.includes('=')) {
+        for (const kv of spec.split('&').filter(Boolean)) {
+          const eq = kv.indexOf('=');
+          if (eq > 0) params.push([kv.slice(0, eq).trim(), kv.slice(eq + 1).trim()]);
+        }
+      } else if (spec) params.push([classify(spec), spec]);
+      if (!params.length) { results.push(node.raw); kept++; n++; continue; }
+      const newName = makeName(node.name, tpl, params[0][1], remark);
+      const made = genOne(node, [...params, ...fixed], newName);
+      results.push(...made);
+      n += made.length;
+    }
+    stat.innerHTML = '<b class="ok">逐行生成 ' + n + ' 条（原样保留 ' + kept + ' 条）</b>' +
+      (bad.length ? '　<b class="skip">忽略 ' + bad.length + ' 行</b>' : '');
+  }
+
+  document.getElementById('ol1').value = results.join('\n');
+  document.getElementById('ob1').value = toB64(results.join('\n'));
+  const builtNodes = results.map(r => parseNode(r));
+  const c = nodesToClash(builtNodes), sb = nodesToSingbox(builtNodes);
+  document.getElementById('oc1').value = c.text;
+  document.getElementById('os1').value = sb.text;
+  out.style.display = 'block';
+  let sample = '';
+  if (results.length) {
+    const pv = getqOf(results[0], 'path');
+    if (pv !== undefined) sample = '示例 path 解码 → ' + pv;
+  }
+  document.getElementById('sample1').textContent = sample;
+  if (existMode === 'multi' && changed) {
+    stat.innerHTML += '　<b class="ok">multi：' + changed + ' 处同名参数——每个冲突参数各复制一个版本（原节点保留原名）</b>';
+  } else if (multiNote.length) {
+    stat.innerHTML += '　<b class="skip">已有参数（' + existMode + '）：' + multiNote.slice(0, 5).join('；') + (multiNote.length > 5 ? '…' : '') + '</b>';
+  }
+}
+function getqOf(link, key) {
+  const qm = link.indexOf('?');
+  if (qm < 0) return undefined;
+  for (const kv of link.slice(qm + 1).split('#')[0].split('&')) {
+    if (kv.startsWith(key + '=')) return dec(kv.slice(key.length + 1));
+  }
+  return undefined;
+}
+
+/* ============================================================
+   ② 节点管理与编辑
+   ============================================================ */
+let nodeList = [];   // 节点对象数组
+let editingIdx = -1; // 当前编辑索引
+
+function importNodes() {
+  const lines = parseNodesInput(document.getElementById('importArea').value);
+  let added = 0, dup = 0, unsup = 0;
+  for (const l of lines) {
+    const sch = l.slice(0, l.indexOf(':')).toLowerCase();
+    if (sch !== 'vless' && sch !== 'trojan') { unsup++; continue; }
+    const node = parseNode(l);
+    if (nodeList.some(x => x.raw === node.raw)) { dup++; continue; }
+    nodeList.push(node); added++;
+  }
+  document.getElementById('importArea').value = '';
+  showStat2('<b class="ok">导入 ' + added + ' 条</b>' +
+    (dup ? '　<b class="skip">重复 ' + dup + ' 条</b>' : '') +
+    (unsup ? '　<b class="skip">非 VLESS/Trojan ' + unsup + ' 条</b>' : ''));
+  renderTable();
+}
+function filteredNodes() {
+  const kw = document.getElementById('search').value.trim().toLowerCase();
+  const fp = document.getElementById('fProto').value, ft = document.getElementById('fTrans').value;
+  return nodeList.map((n, i) => ({ n, i })).filter(({ n }) =>
+    (!kw || (n.name + ' ' + n.server).toLowerCase().includes(kw)) &&
+    (!fp || n.scheme === fp) &&
+    (!ft || (ft === 'xhttp' ? (n.type === 'xhttp' || n.type === 'splithttp') : n.type === ft)));
+}
+function renderTable() {
+  const rows = filteredNodes();
+  const tb = document.getElementById('nodeBody');
+  tb.innerHTML = '';
+  for (const { n, i } of rows) {
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td><input type="checkbox" class="rowchk" data-i="' + i + '"' + (n._sel ? ' checked' : '') + '></td>' +
+      '<td>' + esc(n.name || '(未命名)') + '</td>' +
+      '<td>' + n.scheme.toUpperCase() + '</td>' +
+      '<td>' + (n.type === 'xhttp' || n.type === 'splithttp' ? '<span class="tag warn">XHTTP</span>' : '<span class="tag">WS</span>') + '</td>' +
+      '<td>' + esc(n.server) + ':' + n.port + '</td>' +
+      '<td>' + esc(nodeParamStr(n)) + '</td>' +
+      '<td><button class="btn mini" data-edit="' + i + '">编辑</button> ' +
+      '<button class="btn mini gray" data-del="' + i + '">删除</button></td>';
+    tb.appendChild(tr);
+  }
+  document.getElementById('listCount').textContent = '共 ' + nodeList.length + ' 条，显示 ' + rows.length + ' 条';
+}
+function selIds() {
+  return Array.from(document.querySelectorAll('.rowchk:checked')).map(c => parseInt(c.dataset.i, 10));
+}
+function showStat2(html) { document.getElementById('stat2').innerHTML = html; }
+
+function openEditor(i) {
+  editingIdx = i;
+  const n = nodeList[i];
+  document.getElementById('edTitle').textContent = n.name || n.server;
+  document.getElementById('edName').value = n.name || '';
+  document.getElementById('edProto').value = n.scheme;
+  document.getElementById('edServer').value = n.server;
+  document.getElementById('edPort').value = n.port;
+  document.getElementById('edAuth').value = n.auth;
+  document.getElementById('edSni').value = n.sni;
+  document.getElementById('edHost').value = n.host;
+  document.getElementById('edSec').value = n.security || 'tls';
+  document.getElementById('edType').value = (n.type === 'xhttp' || n.type === 'splithttp') ? 'xhttp' : 'ws';
+  document.getElementById('edPath').value = n.pPath !== null ? (n.pPath + (n.pp.length ? '?' + n.pp.map(([k,v]) => k + '=' + encodeURIComponent(v)).join('&') : '')) : '';
+  document.getElementById('edMode').value = n.mode;
+  document.getElementById('edFp').value = n.fp;
+  const gx = k => { const e = n.pp.find(p => p[0] === k); return e ? e[1] : ''; };
+  document.getElementById('edP').value = gx('p');
+  document.getElementById('edS').value = gx('s');
+  document.getElementById('edWk').value = gx('wk');
+  document.getElementById('edRm').checked = gx('rm') === 'no';
+  document.getElementById('prevOld').textContent = '原始：' + n.raw;
+  const isX = n.type === 'xhttp' || n.type === 'splithttp';
+  document.getElementById('edXhttpHint').style.display = isX ? '' : 'none';
+  document.getElementById('edParamsRow').style.opacity = isX ? 0.45 : 1;
+  ['edP','edS','edWk','edRm'].forEach(id => document.getElementById(id).disabled = isX);
+  document.getElementById('editor').style.display = '';
+  document.getElementById('editor').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  updatePreview();
+}
+function editorToNode() {
+  const n = cloneNode(nodeList[editingIdx]);
+  n.name = document.getElementById('edName').value.trim();
+  n.scheme = document.getElementById('edProto').value;
+  n.server = document.getElementById('edServer').value.trim();
+  n.port = parseInt(document.getElementById('edPort').value, 10) || 443;
+  n.auth = document.getElementById('edAuth').value.trim();
+  n.sni = document.getElementById('edSni').value.trim();
+  n.host = document.getElementById('edHost').value.trim();
+  n.security = document.getElementById('edSec').value;
+  n.type = document.getElementById('edType').value;
+  n.fp = document.getElementById('edFp').value.trim();
+  n.mode = n.type === 'xhttp' ? document.getElementById('edMode').value.trim() : '';
+  // path：保留原有 path 内参数（ed 值原样重建）
+  const pv = document.getElementById('edPath').value.trim();
+  if (pv) {
+    const pi = pv.indexOf('?');
+    n.pPath = pi > -1 ? pv.slice(0, pi) : pv;
+    n.pp = [];
+    if (pi > -1) for (const kv of pv.slice(pi + 1).split('&')) {
+      if (!kv) continue;
+      const eq = kv.indexOf('=');
+      n.pp.push([kv.slice(0, eq), eq > -1 ? dec(kv.slice(eq + 1)) : '']);
+    }
+  } else { n.pPath = null; n.pp = []; }
+  if (n.type !== 'xhttp') {
+    const params = [];
+    const p = document.getElementById('edP').value.trim();
+    const s = document.getElementById('edS').value.trim();
+    const wk = document.getElementById('edWk').value.trim();
+    if (p) params.push(['p', p]);
+    if (s) params.push(['s', s]);
+    if (wk) params.push(['wk', wk.toUpperCase()]);
+    if (document.getElementById('edRm').checked) params.push(['rm', 'no']);
+    // 先清掉参数区已删除的旧键，再写入新值
+    for (const k of ['p','s','wk','rm']) {
+      const i = n.pp.findIndex(x => x[0] === k);
+      if (i > -1 && !params.some(x => x[0] === k)) n.pp.splice(i, 1);
+    }
+    n._pendingParams = params;
+  } else n._pendingParams = [];
+  return n;
+}
+function updatePreview() {
+  if (editingIdx < 0) return;
+  const n = editorToNode();
+  const params = n._pendingParams || [];
+  delete n._pendingParams;
+  const preview = cloneNode(n);
+  const existMode = document.getElementById('edExist').value;
+  setNodeParams(preview, params, existMode);
+  const built = buildNode(preview);
+  document.getElementById('prevNew').textContent = '修改后：' + built;
+  document.getElementById('prevPath').textContent = 'path 解码：' + (preview.pPath !== null ? preview.pPath + (preview.pp.length ? '?' + preview.pp.map(([k,v]) => k + '=' + v).join('&') : '') : '(无)');
+  // 直接取重建链接里真实写入的 path 编码值，避免与 buildNode 的编码规则产生第二套实现
+  document.getElementById('prevEnc').textContent = '实际写入 path（URL 编码）：' + (getqOf(built, 'path') ?? '(无)');
+  document.getElementById('prevNew').dataset.link = built;
+}
+function saveEditor() {
+  if (editingIdx < 0) return;
+  const n = editorToNode();
+  const params = n._pendingParams || [];
+  delete n._pendingParams;
+  const existMode = document.getElementById('edExist').value;
+  if (existMode === 'copy' && params.length) {
+    const conflicts = params.filter(([k]) => n.pp.some(x => x[0] === k));
+    if (conflicts.length) {
+      const copy = cloneNode(nodeList[editingIdx]);
+      const built2 = cloneNode(n);
+      setNodeParams(built2, params, 'overwrite');
+      copy.name = (copy.name || '节点') + '-新';
+      built2.name = copy.name;
+      nodeList[editingIdx] = copy;          // 原节点保留
+      nodeList.push(built2);                 // 新节点
+      editingIdx = nodeList.length - 1;
+      showStat2('<b class="ok">已复制生成新节点「' + esc(copy.name) + '」，原节点保留</b>');
+      renderTable(); openEditor(editingIdx); return;
+    }
+  }
+  const conflicts = setNodeParams(n, params, existMode === 'copy' ? 'keep' : existMode);
+  nodeList[editingIdx] = n;
+  renderTable();
+  showStat2('<b class="ok">已保存「' + esc(n.name || n.server) + '」</b>' +
+    (conflicts.length ? '　<b class="skip">保留旧参数：' + conflicts.join('/') + '</b>' : ''));
+  openEditor(editingIdx);
+}
+
+function exportSelected() {
+  const ids = selIds();
+  const picked = (ids.length ? ids : nodeList.map((_, i) => i)).map(i => nodeList[i]);
+  if (!picked.length) { showStat2('<b class="skip">列表为空。</b>'); return; }
+  const links = picked.map(buildNode);
+  document.getElementById('ol2').value = links.join('\n');
+  document.getElementById('ob2').value = toB64(links.join('\n'));
+  const c = nodesToClash(picked), sb = nodesToSingbox(picked);
+  document.getElementById('oc2').value = c.text;
+  document.getElementById('os2').value = sb.text;
+  document.getElementById('out2').style.display = 'block';
+  showStat2('<b class="ok">导出 ' + picked.length + ' 条</b>' +
+    (c.skipped ? '　<b class="skip">Clash/sing-box 未含 ' + c.skipped + ' 条（非 ws）</b>' : ''));
+}
+
+/* ============================================================
+   ③ 订阅参数生成
+   ============================================================ */
+function genSub() {
+  const subs = document.getElementById('subs').value.split('\n').map(s => s.trim()).filter(Boolean);
+  const list = parseListSig(document.getElementById('plist3').value);
+  const keySel = document.getElementById('pkey3').value;
+  const target = document.getElementById('target').value.trim();
+  const stat = document.getElementById('stat3'), out = document.getElementById('out3');
+  if (!subs.length || !list.length) {
+    stat.innerHTML = '<b class="skip">请同时填入订阅地址和参数列表。</b>'; out.style.display = 'none'; return;
+  }
+  const results = [];
+  let withKey = 0;
+  for (const base0 of subs) {
+    const base = base0.replace(/[?&]+$/, '');
+    const sep = base.includes('?') ? '&' : '?';
+    for (const item of list) {
+      const params = [];                                  // [[键, 值], ...] 按顺序拼接
+      const key = keySel !== 'auto' ? keySel : (item.key || classify(item.value));
+      params.push([key, item.value]);
+      for (const [k, v] of (item.extra || [])) if (!params.some(x => x[0] === k)) params.push([k, v]);
+      if (target && !params.some(([k]) => k === 'target')) params.push(['target', target]);
+      if (item.key && keySel === 'auto') withKey++;
+      results.push('cfnew-' + (item.remark || item.value) + '  ' +
+        base + sep + params.map(([k, v]) => k + '=' + encodeURIComponent(v)).join('&'));
+    }
+  }
+  document.getElementById('ol3').value = results.join('\n');
+  out.style.display = 'block';
+  stat.innerHTML = '<b class="ok">' + subs.length + ' 条订阅 × ' + list.length + ' 个参数 → ' + results.length + ' 条（带标签）</b>' +
+    (withKey ? '　<b class="ok">其中 ' + withKey + ' 条按「标签 | 参数」显式指定了键</b>' : '');
+}
+
+/* ============================================================
+   ④ ProxyIP 测试辅助
+   ============================================================ */
+function genTest() {
+  const list = parseList(document.getElementById('tplist').value);
+  const prefix = document.getElementById('tPrefix').value.trim() || 'CF';
+  const seen = new Set();
+  const ips = [], names = [];
+  for (const it of list) {
+    if (seen.has(it.value)) continue;
+    seen.add(it.value);
+    ips.push(it.value);
+    names.push(prefix + '-' + (it.remark || it.value) + '  ' + it.value);
+  }
+  document.getElementById('tIps').value = ips.join('\n');
+  document.getElementById('tNames').value = names.join('\n');
+}
+function toBatch() {
+  const ips = document.getElementById('tIps').value.trim();
+  if (!ips) { genTest(); }
+  document.querySelector('.tab[data-t="1"]').click();
+  document.getElementById('plist').value = document.getElementById('tIps').value;
+  document.getElementById('nodes').focus();
+}
+
+/* ============================================================
+   交互绑定
+   ============================================================ */
+document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.remove('on'));
+  document.querySelectorAll('.panel').forEach(x => x.classList.remove('on'));
+  t.classList.add('on');
+  document.getElementById('p' + t.dataset.t).classList.add('on');
+});
+document.querySelectorAll('input[name=src]').forEach(r => r.onchange = () => {
+  const src = document.querySelector('input[name=src]:checked').value;
+  document.getElementById('listBox').style.display = src === 'line' ? 'none' : '';
+  document.getElementById('lineBox').style.display = src === 'line' ? '' : 'none';
+  document.getElementById('colList').style.display = src === 'self' ? 'none' : '';
+  document.getElementById('listCap').textContent = src === 'self'
+    ? '取每条节点 @后面的 IP:端口，直接作为它自己的 ProxyIP（入口地址即反代地址）'
+    : '每条节点 × 每行 ProxyIP 全组合输出 —— 铺开测速找最快反代';
+});
+document.getElementById('gen1').onclick = genMain;
+document.getElementById('gen3').onclick = genSub;
+document.getElementById('genT').onclick = genTest;
+document.getElementById('toBatch').onclick = toBatch;
+
+/* ② 事件 */
+document.getElementById('importBtn').onclick = importNodes;
+document.getElementById('clearBtn').onclick = () => { nodeList = []; editingIdx = -1; document.getElementById('editor').style.display = 'none'; document.getElementById('out2').style.display = 'none'; renderTable(); showStat2(''); };
+document.getElementById('search').oninput = renderTable;
+document.getElementById('fProto').onchange = renderTable;
+document.getElementById('fTrans').onchange = renderTable;
+document.getElementById('chkHead').onchange = e => {
+  const on = e.target.checked;
+  document.querySelectorAll('.rowchk').forEach(c => { c.checked = on; nodeList[parseInt(c.dataset.i, 10)]._sel = on; });
+};
+document.getElementById('nodeBody').addEventListener('change', e => {
+  if (e.target.classList.contains('rowchk')) nodeList[parseInt(e.target.dataset.i, 10)]._sel = e.target.checked;
+});
+document.getElementById('nodeBody').addEventListener('click', e => {
+  const ed = e.target.dataset.edit, del = e.target.dataset.del;
+  if (ed !== undefined) openEditor(parseInt(ed, 10));
+  if (del !== undefined) {
+    const i = parseInt(del, 10);
+    nodeList.splice(i, 1);
+    if (editingIdx === i) { editingIdx = -1; document.getElementById('editor').style.display = 'none'; }
+    renderTable();
+  }
+});
+document.getElementById('selAll').onclick = () => {
+  const ids = filteredNodes().map(x => x.i);
+  const anyOff = ids.some(i => !nodeList[i]._sel);
+  ids.forEach(i => nodeList[i]._sel = anyOff);
+  renderTable();
+};
+document.getElementById('delSel').onclick = () => {
+  const ids = selIds();
+  if (!ids.length) { showStat2('<b class="skip">未勾选节点。</b>'); return; }
+  nodeList = nodeList.filter((_, i) => !ids.includes(i));
+  editingIdx = -1; document.getElementById('editor').style.display = 'none';
+  renderTable();
+  showStat2('<b class="ok">已删除 ' + ids.length + ' 条</b>');
+};
+document.getElementById('bApply').onclick = () => {
+  const ids = selIds();
+  if (!ids.length) { showStat2('<b class="skip">请先勾选节点。</b>'); return; }
+  const existMode = document.getElementById('bExist').value;
+  const params = [];
+  const p = document.getElementById('bP').value.trim();
+  const s = document.getElementById('bS').value.trim();
+  const wk = document.getElementById('bWk').value.trim();
+  if (p) params.push(['p', p]);
+  if (s) params.push(['s', s]);
+  if (wk) params.push(['wk', wk.toUpperCase()]);
+  if (document.getElementById('bRm').checked) params.push(['rm', 'no']);
+  if (!params.length) { showStat2('<b class="skip">请至少填一项参数。</b>'); return; }
+  let applied = 0, copies = 0, keptNote = [];
+  for (const i of ids) {
+    const node = cloneNode(nodeList[i]);
+    if (existMode === 'copy') {
+      const conflicts = setNodeParams(cloneNode(node), params, 'keep');
+      if (conflicts.length) {
+        const cp = cloneNode(node);
+        setNodeParams(cp, params, 'overwrite');
+        cp.name = makeName(node.name, '{name}-{v}', params[0][1], '');
+        nodeList.push(cp); copies++; applied++; continue;
+      }
+    }
+    const conf = setNodeParams(node, params, existMode === 'copy' ? 'keep' : existMode);
+    if (conf.length) keptNote.push(node.name + ':' + conf.join('/'));
+    nodeList[i] = node; applied++;
+  }
+  renderTable();
+  showStat2('<b class="ok">已应用到 ' + applied + ' 条</b>' +
+    (copies ? '　<b class="ok">复制新节点 ' + copies + ' 条</b>' : '') +
+    (keptNote.length ? '　<b class="skip">保留旧参数：' + keptNote.slice(0, 5).join('；') + '</b>' : ''));
+};
+/* 编辑器实时预览 */
+['edName','edProto','edServer','edPort','edAuth','edSni','edHost','edSec','edType','edPath','edMode','edFp','edP','edS','edWk','edExist'].forEach(id => {
+  document.getElementById(id).addEventListener('input', updatePreview);
+});
+document.getElementById('edRm').addEventListener('change', updatePreview);
+document.getElementById('edType').addEventListener('change', () => {
+  const isX = document.getElementById('edType').value === 'xhttp';
+  document.getElementById('edModeFld').style.display = isX ? '' : 'none';
+  document.getElementById('edXhttpHint').style.display = isX ? '' : 'none';
+  document.getElementById('edParamsRow').style.opacity = isX ? 0.45 : 1;
+  ['edP','edS','edWk','edRm'].forEach(id => document.getElementById(id).disabled = isX);
+});
+document.getElementById('edSave').onclick = saveEditor;
+document.getElementById('edCancel').onclick = () => { editingIdx = -1; document.getElementById('editor').style.display = 'none'; };
+document.getElementById('edCopy').onclick = () => {
+  const l = document.getElementById('prevNew').dataset.link;
+  if (l) navigator.clipboard.writeText(l);
+};
+/* 导出 */
+document.getElementById('copyL2').onclick = () => navigator.clipboard.writeText(document.getElementById('ol2').value);
+document.getElementById('copyB2').onclick = () => navigator.clipboard.writeText(document.getElementById('ob2').value);
+document.getElementById('copyC2').onclick = () => navigator.clipboard.writeText(document.getElementById('oc2').value);
+document.getElementById('copyS2').onclick = () => navigator.clipboard.writeText(document.getElementById('os2').value);
+document.getElementById('dl2').onclick = () => dl('ol2', 'nodes_managed.txt');
+function dl(srcId, name) {
+  const blob = new Blob([document.getElementById(srcId).value], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name; a.click();
+}
+/* ① 输出按钮 */
+bindCopy('copyL1', 'ol1'); bindCopy('copyB1', 'ob1'); bindCopy('copyC1', 'oc1'); bindCopy('copyS1', 'os1');
+bindCopy('copyL3', 'ol3');
+document.getElementById('dl1').onclick = () => dl('ol1', 'nodes_with_params.txt');
+document.getElementById('dl3').onclick = () => dl('ol3', 'sub_urls.txt');
+function bindCopy(btnId, srcId) {
+  document.getElementById(btnId).onclick = () => navigator.clipboard.writeText(document.getElementById(srcId).value);
+}
+</script>
+</body>
+</html>

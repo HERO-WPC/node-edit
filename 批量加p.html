@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>cfnew 节点批量加 p（ProxyIP）工具</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: "Microsoft YaHei", system-ui, sans-serif; margin: 0; background: #f5f6f8; color: #222; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px 16px 60px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: #666; font-size: 13px; margin-bottom: 20px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: #fff; border: 1px solid #e3e5e8; border-radius: 10px; padding: 14px; }
+  .card h2 { font-size: 14px; margin: 0 0 8px; }
+  textarea { width: 100%; height: 180px; font-family: Consolas, monospace; font-size: 12px;
+             border: 1px solid #d0d3d8; border-radius: 6px; padding: 8px; resize: vertical; }
+  textarea:focus { outline: 2px solid #4a7dff33; border-color: #4a7dff; }
+  .opts { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 14px 0; font-size: 13px; }
+  .opts label { display: flex; align-items: center; gap: 5px; }
+  .opts input[type=text] { border: 1px solid #d0d3d8; border-radius: 6px; padding: 4px 8px; font-size: 13px; width: 130px; }
+  .btn { background: #2f6bff; color: #fff; border: none; border-radius: 8px; padding: 10px 26px;
+         font-size: 15px; cursor: pointer; }
+  .btn:hover { background: #1f56e0; }
+  .btn.mini { font-size: 12px; padding: 5px 12px; background: #555; }
+  .btn.mini:hover { background: #333; }
+  .hint { font-size: 12px; color: #888; margin-top: 4px; }
+  #stat { font-size: 13px; margin: 10px 0 6px; }
+  #stat b.ok { color: #0a7d32; } #stat b.skip { color: #c2620a; }
+  .out { margin-top: 8px; }
+  .out textarea { height: 220px; }
+  details { margin-top: 6px; }
+  summary { cursor: pointer; font-size: 13px; color: #555; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>cfnew 节点批量加 p（ProxyIP）</h1>
+  <div class="sub">为每条 WS 节点 × 每个反代 IP 生成一份副本，path 内嵌 <code>&amp;p=IP</code>，出站直连失败时走对应反代。xhttp 节点不支持 path 传参，会被跳过。</div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>① 节点链接</h2>
+      <textarea id="nodes" placeholder="每行一条 vless:// 或 trojan://，也支持整段 base64 订阅（自动识别解码）"></textarea>
+    </div>
+    <div class="card">
+      <h2>② 反代 IP 列表</h2>
+      <textarea id="proxies" placeholder="每行一个，支持：&#10;1.2.3.4&#10;1.2.3.4:8443&#10;proxy.example.com&#10;[2001:db8::1]:443&#10;1.2.3.4 #HK备注（备注仅用于节点命名）"></textarea>
+      <div class="hint">支持 ip / ip:端口 / 域名 / [IPv6]:端口（与 Worker 端 解析地址值端口 一致）</div>
+    </div>
+  </div>
+
+  <div class="opts">
+    <label>节点名后缀 <input type="text" id="suffix" value="-{p}" title="{p} 会被替换为反代 IP（含端口）"></label>
+    <label><input type="checkbox" id="keepXhttp" checked> xhttp 节点保留原样输出</label>
+    <label>附加参数（可选）<input type="text" id="extra" placeholder="如 wk=HK&amp;rm=US"></label>
+  </div>
+
+  <button class="btn" id="gen">批量生成</button>
+
+  <div id="stat"></div>
+  <div class="card out" id="outCard" style="display:none">
+    <h2>③ 生成结果
+      <button class="btn mini" id="copyLinks">复制链接</button>
+      <button class="btn mini" id="copyB64">复制 base64 订阅</button>
+      <button class="btn mini" id="dl">下载 .txt</button>
+    </h2>
+    <textarea id="outLinks" spellcheck="false"></textarea>
+    <details>
+      <summary>base64 订阅文本（可直接导入客户端）</summary>
+      <textarea id="outB64" spellcheck="false" style="height:120px"></textarea>
+    </details>
+  </div>
+</div>
+
+<script>
+function parseProxies(text) {
+  const list = [];
+  for (const raw of text.split('\n')) {
+    let line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    let remark = '';
+    const hash = line.indexOf('#');
+    if (hash > -1) { remark = line.slice(hash + 1).trim(); line = line.slice(0, hash).trim(); }
+    if (!line) continue;
+    list.push({ value: line, remark });
+  }
+  // 去重
+  const seen = new Set();
+  return list.filter(p => !seen.has(p.value) && seen.add(p.value));
+}
+
+function parseNodes(text) {
+  let t = text.trim();
+  // 整段 base64 订阅自动解码
+  if (!t.includes('://')) {
+    try {
+      const norm = t.replace(/-/g, '+').replace(/_/g, '/').replace(/\s+/g, '');
+      const dec = atob(norm);
+      if (dec.includes('://')) t = dec;
+    } catch (e) {}
+  }
+  const links = [];
+  for (const line of t.split('\n')) {
+    const s = line.trim();
+    if (/^(vless|trojan|ss|vmess|hysteria2?):\/\//.test(s)) links.push(s);
+  }
+  return links;
+}
+
+// 拆链接为 scheme://body#fragment 与 query 串
+function splitLink(link) {
+  const hash = link.indexOf('#');
+  const frag = hash > -1 ? decodeURIComponent(link.slice(hash + 1)) : '';
+  let main = hash > -1 ? link.slice(0, hash) : link;
+  const qm = main.indexOf('?');
+  let query = '', base = main;
+  if (qm > -1) { query = main.slice(qm + 1); base = main.slice(0, qm); }
+  return { base, query, frag };
+}
+
+function setQuery(query, key, value) {
+  const parts = query ? query.split('&').filter(Boolean) : [];
+  const out = [];
+  let replaced = false;
+  for (const kv of parts) {
+    if (kv.split('=')[0] === key) { out.push(key + '=' + value); replaced = true; }
+    else out.push(kv);
+  }
+  if (!replaced) out.push(key + '=' + value);
+  return out.join('&');
+}
+
+function getPath(query) {
+  for (const kv of query.split('&')) {
+    if (kv.startsWith('path=')) {
+      try { return decodeURIComponent(kv.slice(5)); } catch (e) { return kv.slice(5); }
+    }
+  }
+  return null;
+}
+
+function generate() {
+  const nodes = parseNodes(document.getElementById('nodes').value);
+  const proxies = parseProxies(document.getElementById('proxies').value);
+  const suffixTpl = document.getElementById('suffix').value || '-{p}';
+  const keepXhttp = document.getElementById('keepXhttp').checked;
+  let extraQ = document.getElementById('extra').value.trim().replace(/^[?&]+/, '');
+
+  const stat = document.getElementById('stat');
+  const outCard = document.getElementById('outCard');
+  if (!nodes.length || !proxies.length) {
+    stat.innerHTML = '<b class="skip">请同时填入节点链接和反代 IP。</b>';
+    outCard.style.display = 'none';
+    return;
+  }
+
+  const results = [];
+  const skipped = [];
+  let count = 0;
+
+  for (const link of nodes) {
+    const { base, query, frag } = splitLink(link);
+    const type = (query.match(/(?:^|&)type=([^&]*)/) || [])[1] || '';
+    const isXhttp = type === 'xhttp' || type === 'splithttp';
+
+    if (isXhttp && !keepXhttp) { skipped.push(frag || link.slice(0, 40)); continue; }
+
+    if (isXhttp) {
+      // xhttp 无法内嵌 p，原样保留一份
+      results.push(link);
+      count++;
+      continue;
+    }
+
+    // WS / TCP 节点：path 内嵌 p
+    for (const p of proxies) {
+      let q = query;
+      const pathVal = getPath(query);
+      if (pathVal !== null) {
+        let newPath = pathVal;
+        if (!newPath.includes('p=')) {
+          newPath += (newPath.includes('?') ? '&' : '?') + 'p=' + p.value;
+        }
+        if (extraQ) newPath += '&' + extraQ;
+        q = setQuery(query, 'path', encodeURIComponent(newPath));
+      } else {
+        // 无 path 参数的链接：直接把 p 挂到链接 query 上（Worker 同样能读到）
+        q = setQuery(q, 'p', encodeURIComponent(p.value));
+        if (extraQ) q += '&' + extraQ;
+      }
+      const name = frag + suffixTpl.replace('{p}', p.value).replace('{r}', p.remark || p.value);
+      results.push(`${base}?${q}#${encodeURIComponent(name)}`);
+      count++;
+    }
+  }
+
+  const b64 = btoa(unescape(encodeURIComponent(results.join('\n'))));
+  document.getElementById('outLinks').value = results.join('\n');
+  document.getElementById('outB64').value = b64;
+  outCard.style.display = 'block';
+  stat.innerHTML =
+    `<b class="ok">${nodes.length} 条节点 × ${proxies.length} 个反代 → 生成 ${count} 条链接</b>` +
+    (skipped.length ? `　<b class="skip">跳过 ${skipped.length} 条（xhttp 不支持 path 传 p）：${skipped.join('、')}</b>` : '');
+}
+
+document.getElementById('gen').onclick = generate;
+document.getElementById('copyLinks').onclick = () => {
+  navigator.clipboard.writeText(document.getElementById('outLinks').value);
+};
+document.getElementById('copyB64').onclick = () => {
+  navigator.clipboard.writeText(document.getElementById('outB64').value);
+};
+document.getElementById('dl').onclick = () => {
+  const blob = new Blob([document.getElementById('outLinks').value], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'nodes_with_p.txt';
+  a.click();
+};
+</script>
+</body>
+</html>
