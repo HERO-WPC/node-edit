@@ -893,5 +893,71 @@ getEl('clearBtn').click();
 getEl('importBtn').click();
 ok('引号内的 # 不被当作注释（密码含 #）', api.nodeList()[0].auth === 'p#ssw0rd', JSON.stringify(api.nodeList()[0].auth));
 
+/* ========== 17. 节点改名后同步策略组引用 ========== */
+sec('17. 改名后同步 proxy-groups 引用');
+// 策略组名与节点名故意同名，验证不会误改组名
+const RENAME_YAML = [
+  'proxies:',
+  '- type: vless',
+  "  name: 'HK-01'",
+  '  server: 1.2.3.4', '  port: 443', '  uuid: 1111', '  network: ws', '  tls: true',
+  '  ws-opts:', '    path: /ws',
+  '- type: vless',
+  "  name: 'JP-01'",
+  '  server: 5.6.7.8', '  port: 443', '  uuid: 2222', '  network: ws', '  tls: true',
+  '  ws-opts:', '    path: /tj',
+  'proxy-groups:',
+  "  - name: 'HK-01'",            // 组名与节点名同名
+  '    type: select',
+  '    proxies:',
+  "      - 'HK-01'",
+  "      - 'JP-01'",
+  '      - DIRECT',
+  "  - name: '🚀 节点选择'",
+  '    type: select',
+  '    proxies:',
+  "      - 'HK-01'",
+  "      - 'JP-01'",
+  'rules:',
+  '  - DOMAIN-SUFFIX,example.com,HK-01',
+  '  - MATCH,🚀 节点选择',
+  '',
+].join('\n');
+
+set('importArea', RENAME_YAML);
+getEl('clearBtn').click();
+getEl('importBtn').click();
+getEl('clashExport').click();
+const sameOut = getEl('clashOut').value;
+ok('未改名时策略组与规则完全不动', sameOut.includes("proxy-groups:\n  - name: 'HK-01'") &&
+  sameOut.includes("      - 'HK-01'") && sameOut.includes('  - DOMAIN-SUFFIX,example.com,HK-01'), '');
+ok('未改名时无同步提示', !getEl('clashOutStat').innerHTML.includes('同步更新'), getEl('clashOutStat').innerHTML);
+
+// 改名
+api.openEditor(0);
+set('edName', '香港01');
+api.updatePreview(); api.saveEditor();
+getEl('clashExport').click();
+const renamed = getEl('clashOut').value;
+ok('节点自身已用新名', renamed.includes('name: "香港01"'), renamed.match(/^-\s+name:.*$/gm)?.join(' | '));
+ok('两处组成员引用同步为新名', (renamed.match(/- '香港01'/g) || []).length === 2,
+  '实际成员行: ' + (renamed.match(/^\s+- '.*$/gm) || []).join(' | '));
+ok('旧名引用已不存在', !renamed.includes("- 'HK-01'"), renamed.match(/^\s+- '.*$/gm)?.join(' | '));
+ok('策略组自己的名字未被误改', renamed.includes("  - name: 'HK-01'"), '');
+ok('内置成员 DIRECT 未受影响', renamed.includes('- DIRECT'), '');
+ok('rules 按设计不改（仅同步策略组成员）', renamed.includes('  - DOMAIN-SUFFIX,example.com,HK-01'), '');
+ok('未改名的第 2 个节点仍原文照抄', /- type: vless\n\s+name: 'JP-01'/.test(renamed), '');
+ok('提示说明同步处数与映射', /同步更新 2 处策略组成员引用/.test(getEl('clashOutStat').innerHTML) &&
+  getEl('clashOutStat').innerHTML.includes('HK-01→香港01'), getEl('clashOutStat').innerHTML);
+// 只改 sni 等其它字段不应触发引用同步
+set('importArea', RENAME_YAML);
+getEl('clearBtn').click();
+getEl('importBtn').click();
+api.openEditor(0);
+set('edSni', 'new.example.com');
+api.updatePreview(); api.saveEditor();
+getEl('clashExport').click();
+ok('只改其它字段时不误报同步改名', !getEl('clashOutStat').innerHTML.includes('同步更新'), getEl('clashOutStat').innerHTML);
+
 console.log('\n================ 结果: PASS ' + pass + ' / FAIL ' + fail + ' ================');
 process.exit(fail ? 1 : 0);

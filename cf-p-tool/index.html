@@ -1528,6 +1528,48 @@ function clashEntryChanged(n) {
   return clashEntrySnapshot(n) !== n._snapshot;
 }
 
+/* 节点改名后，同步更新 proxies 之外对它的引用（主要是 proxy-groups 的成员列表）。
+   策略组的结构固定为：
+     - name: "组名"      ← 这是组自己的名字，不能改
+       ...
+       proxies:
+         - "成员名"        ← 这一层才是对节点的引用
+   因此只在「缩进 ≥ 4 且以 - 开头的行」上做整项名称替换，
+   避免误改组名、rules 里的策略名，或碰巧同名的其它字符串。 */
+function renameInGroups(text, map) {
+  if (!map.size) return { text, replaced: 0 };
+  let replaced = 0;
+  const out = String(text).split('\n').map(line => {
+    if (!/^\s{4,}-\s/.test(line)) return line;
+    const m = line.match(/^(\s*-\s*)(.*)$/);
+    if (!m) return line;
+    let v = m[2].trim();
+    const q = (v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'")) ? v[0] : '';
+    if (q) v = v.slice(1, -1);
+    if (!map.has(v)) return line;
+    replaced++;
+    const nv = map.get(v);
+    return m[1] + (q ? q + nv + q : yq(nv));
+  }).join('\n');
+  return { text: out, replaced };
+}
+
+/* 从条目原文里取出 name 的原始值（用于判断节点是否被改名） */
+function originalNameOf(rawEntry) {
+  if (!rawEntry) return '';
+  for (const line of String(rawEntry).split('\n')) {
+    const t = line.trim();
+    if (/^-\s/.test(t)) {
+      const m = t.slice(1).trim().match(/^name:\s*(.*)$/);
+      if (m) return scalarValue(m[1]);
+      continue;
+    }
+    const m = line.match(/^\s+name:\s*(.*)$/);
+    if (m) return scalarValue(m[1]);
+  }
+  return '';
+}
+
 function exportClashYaml() {
   const stat = document.getElementById('clashOutStat');
   if (!clashSession) {
@@ -1560,12 +1602,22 @@ function exportClashYaml() {
     return;
   }
   const yaml = blocks.join('\n');
-  const out = clashSession.head + '\n' + yaml + (yaml.endsWith('\n') ? '' : '\n') + clashSession.tail;
+  // 节点改名后，同步更新 proxy-groups 里对它的引用（否则策略组会指向不存在的节点）
+  const renameMap = new Map();
+  for (const n of changed) {
+    const oldName = originalNameOf(n._rawEntry);
+    const newName = n.name || (n.server + ':' + n.port);
+    if (oldName && oldName !== newName) renameMap.set(oldName, newName);
+  }
+  const tailFix = renameInGroups(clashSession.tail, renameMap);
+  const out = clashSession.head + '\n' + yaml + (yaml.endsWith('\n') ? '' : '\n') + tailFix.text;
   document.getElementById('clashOut').value = out;
   const rebuiltCount = [...rawOf.values()].filter(Boolean).length + appended.length;
   stat.innerHTML = '<b class="ok">已写回 ' + (untouched.length + rebuiltCount) + ' 条节点</b>' +
     (untouched.length ? '　<b class="ok">其中 ' + untouched.length + ' 条未修改，原文照抄</b>' : '') +
     (rebuiltCount ? '　<b class="skip">' + rebuiltCount + ' 条已按标准格式重建</b>' : '') +
+    (renameMap.size ? '　<b class="ok">已同步更新 ' + tailFix.replaced + ' 处策略组成员引用（' +
+      [...renameMap.entries()].map(([o, n2]) => o + '→' + n2).join('、') + '）</b>' : '') +
     (clashSession.raw.length ? '　<b class="ok">原样保留 ' + clashSession.raw.length + ' 条其它协议</b>' : '') +
     (skipped ? '　<b class="skip">跳过 ' + skipped + ' 条（非 ws，Clash 无法表示）</b>' : '') +
     '　<b class="ok">proxies 以外的内容未改动</b>';
