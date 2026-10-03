@@ -69,7 +69,7 @@ const window = { confirm: () => confirmAnswer };
 
 /* ---------------- 执行被测代码 ---------------- */
 const ctx = { document, navigator, console, window, atob: globalThis.atob, btoa: globalThis.btoa, Blob: class {}, URL: globalThis.URL, encodeURIComponent, decodeURIComponent };
-const api = new Function(...Object.keys(ctx), code + '\n;return {parseNode,buildNode,setNodeParams,cloneNode,classify,makeName,parseList,parseListSig,parseNodesInput,genMain,openEditor,editorToNode,updatePreview,saveEditor,exportSelected,genSub,genTest,toBatch,renderTable,getqOf,generateClashConfig,selIds,setNodeQ,syncPathParam,replaceValue,nodeList:()=>nodeList};')(...Object.values(ctx));
+const api = new Function(...Object.keys(ctx), code + '\n;return {parseNode,buildNode,setNodeParams,cloneNode,classify,makeName,parseList,parseListSig,parseNodesInput,genMain,openEditor,editorToNode,updatePreview,saveEditor,exportSelected,genSub,genTest,toBatch,renderTable,getqOf,generateClashConfig,selIds,setNodeQ,syncPathParam,replaceValue,selfProxyValue,nodeList:()=>nodeList};')(...Object.values(ctx));
 
 /* ---------------- 断言 ---------------- */
 let pass = 0, fail = 0;
@@ -711,6 +711,73 @@ ok('path 内的同名参数同步更新', (() => {
   const n = api.nodeList()[0];
   return n.pp.some(([k, v]) => k === 'sni' && v === 'new.com') && !n.pp.some(([k, v]) => k === 'sni' && v === 'old.com');
 })(), JSON.stringify(api.nodeList()[0].pp));
+
+/* ========== 15. ② 以入口地址作 ProxyIP ========== */
+sec('15. ② 以入口地址作 ProxyIP');
+set('importArea', MIXED.join('\n'));      // 3 ws + 2 xhttp
+getEl('clearBtn').click();
+getEl('importBtn').click();
+ok('导入 5 条', api.nodeList().length === 5, '实际 ' + api.nodeList().length);
+
+ok('入口地址取值（IPv4）', api.selfProxyValue({ server: '1.2.3.4', port: 443 }) === '1.2.3.4:443');
+ok('入口地址取值（IPv6 加方括号）', api.selfProxyValue({ server: '2001:db8::1', port: 443 }) === '[2001:db8::1]:443', api.selfProxyValue({ server: '2001:db8::1', port: 443 }));
+ok('入口地址取值（无端口默认 443）', api.selfProxyValue({ server: 'a.com' }) === 'a.com:443', api.selfProxyValue({ server: 'a.com' }));
+
+// 只作用于勾选：勾选第 1、2 条
+rowchks.length = 0;
+[0, 1].forEach(i => { const c = mkEl('sf' + i); c.dataset.i = String(i); c.checked = true; rowchks.push(c); });
+set('bExist', 'overwrite');
+getEl('bSelf').click();
+ok('勾选的两条写入自身入口', api.nodeList()[0].pp.some(([k, v]) => k === 'p' && v === '1.2.3.4:443') &&
+  api.nodeList()[1].pp.some(([k, v]) => k === 'p' && v === '5.6.7.8:8443'),
+  JSON.stringify([api.nodeList()[0].pp, api.nodeList()[1].pp]));
+ok('未勾选的第三条未被写入', !api.nodeList()[2].pp.some(([k]) => k === 'p'), JSON.stringify(api.nodeList()[2].pp));
+ok('提示含条数与范围', getEl('stat2').innerHTML.includes('已把入口地址设为 ProxyIP：2 条') && getEl('stat2').innerHTML.includes('勾选的 2 条'), getEl('stat2').innerHTML);
+ok('链接里 p 已生效', api.buildNode(api.nodeList()[0]).includes('p%3D1.2.3.4%3A443'), api.buildNode(api.nodeList()[0]));
+
+// keep 策略保留已有 p
+rowchks.length = 0;
+const beforeKeep = api.nodeList()[0].pp.find(([k]) => k === 'p')[1];
+set('bExist', 'keep');
+getEl('bSelf').click();
+ok('keep 策略不动已有 p', api.nodeList()[0].pp.find(([k]) => k === 'p')[1] === beforeKeep, JSON.stringify(api.nodeList()[0].pp));
+ok('keep 时有保留提示', getEl('stat2').innerHTML.includes('按当前策略保留未改'), getEl('stat2').innerHTML);
+
+// copy 策略复制新节点
+rowchks.length = 0;
+const cA = mkEl('cq0'); cA.dataset.i = '0'; cA.checked = true; rowchks.push(cA);
+const nBefore = api.nodeList().length;
+set('bExist', 'copy');
+getEl('bSelf').click();
+ok('copy 策略复制出新节点', api.nodeList().length === nBefore + 1, '前 ' + nBefore + ' → 后 ' + api.nodeList().length);
+ok('copy 提示含复制条数', getEl('stat2').innerHTML.includes('复制新节点 1 条'), getEl('stat2').innerHTML);
+
+// 不勾选 → 作用于全部
+rowchks.length = 0;
+set('bExist', 'overwrite');
+getEl('bSelf').click();
+ok('未勾选时作用于全部',
+  api.nodeList().every(n => n.pp.some(([k, v]) => k === 'p' && v === (String(n.server).includes(':') ? '[' + n.server + ']' : n.server) + ':' + n.port)),
+  JSON.stringify(api.nodeList().map(n => [n.server, n.pp.find(([k]) => k === 'p')?.[1]])));
+ok('范围提示为「列表全部」', getEl('stat2').innerHTML.includes('列表全部'), getEl('stat2').innerHTML);
+ok('语义警示已给出', getEl('stat2').innerHTML.includes('CF 边缘'), getEl('stat2').innerHTML);
+
+// 与 YAML 导入的节点联动
+set('importArea', SAMPLE_YAML);
+getEl('clearBtn').click();
+getEl('importBtn').click();
+rowchks.length = 0;
+set('bExist', 'overwrite');
+getEl('bSelf').click();
+ok('YAML 导入的节点同样适用', api.nodeList()[0].pp.some(([k, v]) => k === 'p' && v === '1.2.3.4:443') &&
+  api.nodeList()[1].pp.some(([k, v]) => k === 'p' && v === '5.6.7.8:8443'), JSON.stringify(api.nodeList().map(n => n.pp)));
+getEl('clashExport').click();
+// YAML 里 path 以「编码成 url 值、再解回 path 形态」写出：? 与 & 是字面量，
+// 只有内层参数值保持 %3A 编码（Clash 的 ws-opts.path 正是这个形态）
+const clashPaths = getEl('clashOut').value.match(/path: "[^"]*"/g)?.join(' | ');
+ok('写回 YAML 时写入的 p 一并生效',
+  getEl('clashOut').value.includes('p=1.2.3.4%3A443') && getEl('clashOut').value.includes('p=5.6.7.8%3A8443'), clashPaths);
+ok('写回 YAML 后仍保留原有 ed 参数', getEl('clashOut').value.includes('ed=2048'), clashPaths);
 
 console.log('\n================ 结果: PASS ' + pass + ' / FAIL ' + fail + ' ================');
 process.exit(fail ? 1 : 0);

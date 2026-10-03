@@ -478,6 +478,11 @@
         <label>已有参数
           <select id="bExist"><option value="keep" selected>保留</option><option value="overwrite">覆盖</option><option value="copy">复制新节点</option></select></label>
         <button class="btn mini" id="bApply">应用到所选</button>
+        <button class="btn mini" id="bSelf">以入口地址作 ProxyIP</button>
+      </div>
+      <div class="hint" style="margin-top:2px">
+        「以入口地址作 ProxyIP」= 把每条节点 `@` 后的主机:端口设为它自己的 <code>p</code>，作用范围同上方勾选（未勾选则全部），
+        沿用「已有参数」的策略。适合地址本身就是真实入口的直连节点；若地址已是 CF 边缘/优选 IP，出站会再绕一层。
       </div>
     </div>
 
@@ -1177,7 +1182,7 @@ function genMain() {
         if (xhttpMode === 'keep') { results.push(node.raw); n++; } else skippedX++;
         continue;
       }
-      const items = self ? [{ value: (node.server.includes(':') ? '[' + node.server + ']' : node.server) + ':' + node.port, remark: '' }] : list;
+      const items = self ? [{ value: selfProxyValue(node), remark: '' }] : list;
       for (const item of items) {
         if (!item.value) { skippedX++; continue; }
         const key = self ? 'p' : classify(item.value);
@@ -1736,6 +1741,7 @@ document.getElementById('importBtn').onclick = importNodes;
 document.getElementById('exportBtn').onclick = exportSelected;
 document.getElementById('bSni').onclick = () => applySniHostReplace(false);
 document.getElementById('bSniAll').onclick = () => applySniHostReplace(true);
+document.getElementById('bSelf').onclick = () => applySelfProxy(false);
 document.getElementById('sendToBatch').onclick = sendToBatch;
 document.getElementById('sendToBatch2').onclick = sendToBatch;
 document.getElementById('clashExport').onclick = exportClashYaml;
@@ -1794,6 +1800,49 @@ function nodeParamValue(n, key) {
     if (hit && String(hit[1] || '') !== '') return String(hit[1]);
   }
   return '';
+}
+
+/* 取节点的「入口地址」：@ 后面的主机:端口，IPv6 带方括号。
+   ① 的「入口 IP 自动作为 ProxyIP」与 ② 的「应用入口自反代」共用这一处实现。 */
+function selfProxyValue(node) {
+  const host = String(node.server || '').includes(':') ? '[' + node.server + ']' : node.server;
+  const port = node.port || 443;
+  return host + ':' + port;
+}
+
+/* 批量把「节点自身的入口地址」设为它的 ProxyIP(p)，
+   与 ① 的「入口 IP 自动作为 ProxyIP」同一套语义，只是作用在②的列表上。
+   沿用「已有参数」下拉的冲突策略：保留 / 覆盖 / 复制新节点。 */
+function applySelfProxy(reuseSelection) {
+  const ids = selIds();
+  const useAll = reuseSelection === true || !ids.length;
+  const targets = (useAll ? nodeList.map((_, i) => i) : ids).map(i => nodeList[i]).filter(Boolean);
+  if (!targets.length) { showStat2('<b class="skip">列表为空。</b>'); return; }
+  const existMode = document.getElementById('bExist').value;
+  let applied = 0, copies = 0, kept = 0;
+
+  for (const n of targets) {
+    const val = selfProxyValue(n);
+    if (existMode === 'copy') {
+      // 已经有 p 才需要复制，否则直接写入本身
+      const conflicts = setNodeParams(cloneNode(n), [['p', val]], 'keep');
+      if (conflicts.length) {
+        const cp = cloneNode(n);
+        setNodeParams(cp, [['p', val]], 'overwrite');
+        cp.name = makeName(n.name, '{name}-{v}', val, '');
+        nodeList.push(cp); copies++; applied++;
+        continue;
+      }
+    }
+    const conf = setNodeParams(n, [['p', val]], existMode === 'copy' ? 'keep' : existMode);
+    if (conf.length) kept++; else applied++;
+  }
+  renderTable();
+  showStat2('<b class="ok">已把入口地址设为 ProxyIP：' + applied + ' 条</b>' +
+    '　<b class="skip">范围：' + (useAll ? '列表全部 ' + nodeList.length + ' 条' : '勾选的 ' + ids.length + ' 条') + '</b>' +
+    (copies ? '　<b class="ok">复制新节点 ' + copies + ' 条</b>' : '') +
+    (kept ? '　<b class="skip">' + kept + ' 条已有 p，按当前策略保留未改</b>' : '') +
+    '　<b class="skip">注意：节点地址若已是 CF 边缘/优选 IP，出站仍会再绕一层</b>');
 }
 
 /* 批量替换 SNI / Host（可作用于所选或全部节点） */
