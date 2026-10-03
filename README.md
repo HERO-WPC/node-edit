@@ -43,7 +43,14 @@
 
 **自动识别 `p` / `s`**：带 `socks5://`、`socks://`、`http(s)://` 前缀或含 `user:pass@` 的归为 `s` 代理，其余（IP、IP:端口、域名、`[IPv6]:端口`）归为 `p` 反代。
 
-**输出**：节点链接、base64 订阅、Clash 片段、sing-box 片段，另外可一键生成**完整 Clash 配置**（含 DNS/fake-ip、策略组、规则，可直接导入客户端或存为 `config.yaml`）。
+**输出**：节点链接、base64 订阅、Clash 片段、sing-box 片段，另外可一键生成**完整 Clash 配置**（可直接导入客户端或存为 `config.yaml`），分两个级别：
+
+| 级别 | 规模 | 说明 |
+|---|---|---|
+| **完整**（默认） | 360 行 / 14 策略组 / 14 rule-providers / 52 条规则 | 与 Worker 端 `?target=clash` 输出同构：含 `geox-url`、`sniffer`、DNS fallback，规则集走 jsDelivr 拉取 loyalsoldier/clash-rules |
+| **精简** | 112 行 / 4 策略组 / 6 条规则 | 不依赖任何外部规则集，适合快速验证或内网环境 |
+
+> 完整级别的规则集文件由客户端首次使用时从 jsDelivr 下载（约 14 个小文件），需要能访问该 CDN。
 
 **命名模板**：`{name}` 原名、`{r}` 备注、`{v}` 参数值、`{i}` IP、`{port}` 端口。
 
@@ -169,6 +176,7 @@ node contrast.mjs
 # 生成一份测试用 Clash 配置，再用结构校验器检查它
 node gencfg.mjs
 node checkclash.mjs "$TEMP/cf-clash.yaml"     # Windows；其他系统用 /tmp/cf-clash.yaml
+CLASH_LEVEL=slim node gencfg.mjs              # 生成精简级别（默认 full）
 
 # YAML 写回保真度：proxies 区块以外的内容必须逐字节一致
 node fidelity.mjs <原始配置> <写回结果>

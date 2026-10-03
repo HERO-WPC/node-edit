@@ -410,6 +410,7 @@ getEl('clashOnly').click();
 ok('Clash 快捷按钮切回 clash 并生成', getEl('clientType').value === 'clash' && getEl('ol3').value.includes('target=clash'), getEl('ol3').value);
 
 sec('10b. 完整 Clash 配置');
+set('clashLevel', 'full');                 // 桩里 select 默认是空串，需显式指定
 radios.forEach(r => r.checked = r.value === 'list');
 set('nodes', cases[0] + '\n' + cases[1] + '\n' + cases[2]);   // 2 条 ws + 1 条 xhttp
 set('plist', '11.1.1.1'); set('existMode', 'keep'); set('xhttpMode', 'keep');
@@ -426,6 +427,25 @@ ok('xhttp 节点被跳过并提示', getEl('clashFullStat').innerHTML.includes('
 ok('proxy-groups 引用了节点名', cfg.includes('proxy-groups:') && cfg.includes('type: select'));
 ok('规则以 MATCH 收尾', /- MATCH,/.test(cfg), cfg.split('\n').slice(-2).join(' | '));
 ok('fake-ip 与 DNS 配置齐备', cfg.includes('enhanced-mode: fake-ip') && cfg.includes('default-nameserver:'));
+// 完整级别的规模：应与 Worker 端 ?target=clash 的输出同构
+ok('完整级别含 14 个策略组', (cfg.match(/^  - name:/gm) || []).length === 14, '实际 ' + (cfg.match(/^  - name:/gm) || []).length);
+ok('完整级别含 14 条 rule-providers', (cfg.match(/^    type: http$/gm) || []).length === 14, '实际 ' + (cfg.match(/^    type: http$/gm) || []).length);
+ok('完整级别含 52 条规则', (cfg.match(/^  - (DOMAIN|IP-CIDR|GEOIP|MATCH|RULE-SET)/gm) || []).length === 52, '实际 ' + (cfg.match(/^  - (DOMAIN|IP-CIDR|GEOIP|MATCH|RULE-SET)/gm) || []).length);
+ok('完整级别含 geox-url 与 sniffer', cfg.includes('geox-url:') && cfg.includes('sniffer:'));
+ok('规则集指向 jsDelivr', cfg.includes('fastly.jsdelivr.net/gh/Loyalsoldier/clash-rules@release'), '');
+ok('含各类应用策略组', ['🌍 国外媒体', '📺 哔哩哔哩', '📹 油管视频', '🎬 奈飞视频', '🌐 谷歌服务', '🤖 OpenAI', 'Ⓜ️ 微软服务', '🍎 苹果服务', '🍃 应用净化']
+  .every(n => cfg.includes('- name: "' + n + '"')), '缺少分组');
+// 精简级别
+set('clashLevel', 'slim');
+getEl('genClash1').click();
+const slim = getEl('ocf1').value;
+ok('精简级别只有 4 个策略组', (slim.match(/^  - name:/gm) || []).length === 4, '实际 ' + (slim.match(/^  - name:/gm) || []).length);
+ok('精简级别无 rule-providers', !slim.includes('rule-providers:'), '');
+ok('精简级别不依赖外部规则集', !slim.includes('jsdelivr'), '');
+ok('精简级别仍有 DNS 与 fake-ip', slim.includes('enhanced-mode: fake-ip') && slim.includes('nameserver:'));
+ok('提示区分完整/精简', getEl('clashFullStat').innerHTML.includes('精简'), getEl('clashFullStat').innerHTML);
+set('clashLevel', 'full');
+getEl('genClash1').click();
 // 无输出时应给出提示而不是生成空配置
 set('ol1', '');
 getEl('genClash1').click();

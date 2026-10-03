@@ -36,6 +36,8 @@ get('nameTpl').value = '{name}-{r}-{i}';
 get('existMode').value = 'keep';
 get('xhttpMode').value = 'keep';
 get('wk').value = '';
+// 配置级别：full（默认，与 Worker 端同构）| slim（不依赖外部规则集）
+get('clashLevel').value = process.env.CLASH_LEVEL || 'full';
 
 api.genMain();
 api.generateClashConfig();

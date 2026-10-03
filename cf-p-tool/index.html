@@ -402,6 +402,10 @@
         <button class="btn mini" id="copyC1">复制 Clash</button>
         <button class="btn mini" id="copyS1">复制 sing-box</button>
         <button class="btn mini" id="dl1">下载 .txt</button>
+        <label style="display:flex;align-items:center;gap:5px">配置级别 <select id="clashLevel">
+          <option value="full" selected>完整</option>
+          <option value="slim">精简</option>
+        </select></label>
         <button class="btn mini" id="genClash1">生成完整 Clash 配置</button>
       </h2>
       <div class="sample" id="sample1"></div>
@@ -1596,30 +1600,192 @@ function normalizeSubBase(raw) {
 function clashGroupLines(names) {
   return names.map(n => '      - ' + yq(n)).join('\n');
 }
-function generateClashConfig() {
-  const wrap = document.getElementById('clashFullWrap');
-  const stat = document.getElementById('clashFullStat');
-  const links = document.getElementById('ol1').value.split('\n').filter(Boolean);
-  if (!links.length) {
-    stat.innerHTML = '<b class="skip">请先在上方点「生成节点」，确认已有输出后再生成配置。</b>';
-    wrap.style.display = 'block'; wrap.open = true;
-    document.getElementById('ocf1').value = '';
-    return;
-  }
-  const built = links.map(r => parseNode(r));
-  const c = nodesToClash(built);
-  const usable = built.filter(n => n.type === 'ws');
-  if (!usable.length) {
-    stat.innerHTML = '<b class="skip">输出里没有 WS 节点（xhttp 无法写成 Clash 代理），完整配置未生成。</b>';
-    wrap.style.display = 'block'; wrap.open = true;
-    document.getElementById('ocf1').value = '';
-    return;
-  }
-  const names = usable.map(n => n.name || (n.server + ':' + n.port));
-  const parts = [];
-  parts.push([
-    '# cfnew 完整 Clash 配置（本地生成，供校验 / 自建订阅用）',
-    '# 与 Worker 端 ?target=clash 同构；需要自动更新的订阅链接请用「③ 订阅参数生成」',
+
+/* Worker 端的规则源基址（loyalsoldier/clash-rules，走 jsDelivr CDN） */
+const CLASH_RULES_BASE = 'https://fastly.jsdelivr.net/gh/Loyalsoldier/clash-rules@release';
+/* rule-providers 的 behavior 映射，与 Worker 端一致 */
+const CLASH_PROVIDERS = [
+  ['reject', 'domain'], ['icloud', 'domain'], ['apple', 'domain'], ['google', 'domain'],
+  ['proxy', 'domain'], ['direct', 'domain'], ['private', 'domain'], ['gfw', 'domain'],
+  ['greatfire', 'domain'], ['tld-not-cn', 'domain'], ['telegramcidr', 'ipcidr'],
+  ['cncidr', 'ipcidr'], ['lancidr', 'ipcidr'], ['applications', 'classical'],
+];
+/* 完整规则集（照搬 Worker 端 生成值值589 的规则列表） */
+const CLASH_RULES_FULL = [
+  'rules:',
+  '  - DOMAIN-SUFFIX,acl4.ssr,🎯 全球直连',
+  '  - DOMAIN-SUFFIX,local,🎯 全球直连',
+  '  - DOMAIN,clash.razord.top,🎯 全球直连',
+  '  - DOMAIN,yacd.haishan.me,🎯 全球直连',
+  '  - DOMAIN,yacd.metacubex.one,🎯 全球直连',
+  '  - DOMAIN,d.metacubex.one,🎯 全球直连',
+  '  - DOMAIN-SUFFIX,googleapis.cn,🌐 谷歌服务',
+  '  - DOMAIN-SUFFIX,gstatic.com,🌐 谷歌服务',
+  '  - DOMAIN-SUFFIX,xn--ngstr-lra8j.com,🌐 谷歌服务',
+  '  - DOMAIN-SUFFIX,googlevideo.com,📹 油管视频',
+  '  - DOMAIN-SUFFIX,googleusercontent.com,🌐 谷歌服务',
+  '  - DOMAIN-KEYWORD,youtube,📹 油管视频',
+  '  - DOMAIN-SUFFIX,youtube.com,📹 油管视频',
+  '  - DOMAIN-SUFFIX,youtu.be,📹 油管视频',
+  '  - DOMAIN-KEYWORD,netflix,🎬 奈飞视频',
+  '  - DOMAIN-SUFFIX,nflxext.com,🎬 奈飞视频',
+  '  - DOMAIN-SUFFIX,nflxso.net,🎬 奈飞视频',
+  '  - DOMAIN-SUFFIX,nflxvideo.net,🎬 奈飞视频',
+  '  - DOMAIN-SUFFIX,nflximg.com,🎬 奈飞视频',
+  '  - DOMAIN-SUFFIX,nflximg.net,🎬 奈飞视频',
+  '  - DOMAIN-SUFFIX,netflix.com,🎬 奈飞视频',
+  '  - DOMAIN-SUFFIX,netflix.net,🎬 奈飞视频',
+  '  - DOMAIN-SUFFIX,bilibili.com,📺 哔哩哔哩',
+  '  - DOMAIN-SUFFIX,bilivideo.com,📺 哔哩哔哩',
+  '  - DOMAIN-SUFFIX,hdslb.com,📺 哔哩哔哩',
+  '  - DOMAIN-KEYWORD,openai,🤖 OpenAI',
+  '  - DOMAIN-KEYWORD,chatgpt,🤖 OpenAI',
+  '  - DOMAIN-SUFFIX,openai.com,🤖 OpenAI',
+  '  - DOMAIN-SUFFIX,chatgpt.com,🤖 OpenAI',
+  '  - DOMAIN-SUFFIX,oaistatic.com,🤖 OpenAI',
+  '  - DOMAIN-SUFFIX,oaiusercontent.com,🤖 OpenAI',
+  '  - DOMAIN-SUFFIX,anthropic.com,🤖 OpenAI',
+  '  - DOMAIN-SUFFIX,claude.ai,🤖 OpenAI',
+  '  - DOMAIN-SUFFIX,perplexity.ai,🤖 OpenAI',
+  '  - DOMAIN-SUFFIX,gemini.google.com,🤖 OpenAI',
+  '  - RULE-SET,applications,🎯 全球直连',
+  '  - RULE-SET,private,🎯 全球直连',
+  '  - RULE-SET,reject,🛑 全球拦截',
+  '  - RULE-SET,icloud,🍎 苹果服务',
+  '  - RULE-SET,apple,🍎 苹果服务',
+  '  - RULE-SET,google,🌐 谷歌服务',
+  '  - RULE-SET,proxy,🚀 节点选择',
+  '  - RULE-SET,gfw,🚀 节点选择',
+  '  - RULE-SET,greatfire,🚀 节点选择',
+  '  - RULE-SET,tld-not-cn,🚀 节点选择',
+  '  - RULE-SET,direct,🎯 全球直连',
+  '  - RULE-SET,lancidr,🎯 全球直连,no-resolve',
+  '  - RULE-SET,cncidr,🎯 全球直连,no-resolve',
+  '  - RULE-SET,telegramcidr,📲 电报信息,no-resolve',
+  '  - GEOIP,LAN,🎯 全球直连,no-resolve',
+  '  - GEOIP,CN,🎯 全球直连,no-resolve',
+  '  - MATCH,🐟 漏网之鱼',
+];
+
+/* 完整配置的头部（含 geox-url、sniffer、DNS fallback，与 Worker 端一致） */
+function clashHeadFull() {
+  return [
+    '# cfnew 完整 Clash 配置（本地生成）',
+    '# 规则集与策略组照搬 Worker 端 ?target=clash 的输出；规则集文件走 jsDelivr 下载',
+    'mixed-port: 7890',
+    'allow-lan: true',
+    'mode: rule',
+    'log-level: info',
+    'ipv6: true',
+    'external-controller: 127.0.0.1:9090',
+    'unified-delay: true',
+    'tcp-concurrent: true',
+    'geodata-mode: true',
+    'geo-auto-update: true',
+    'geo-update-interval: 24',
+    'geox-url:',
+    '  geoip: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat"',
+    '  geosite: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat"',
+    '  mmdb: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb"',
+    '  asn: "https://fastly.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/GeoLite2-ASN.mmdb"',
+    'sniffer:',
+    '  enable: true',
+    '  force-dns-mapping: true',
+    '  parse-pure-ip: true',
+    '  sniff:',
+    '    HTTP:',
+    '      ports: [80, 8080-8880]',
+    '      override-destination: true',
+    '    TLS:',
+    '      ports: [443, 8443]',
+    '    QUIC:',
+    '      ports: [443, 8443]',
+    'dns:',
+    '  enable: true',
+    '  listen: 0.0.0.0:1053',
+    '  ipv6: true',
+    '  enhanced-mode: fake-ip',
+    '  fake-ip-range: 198.18.0.1/16',
+    '  fake-ip-filter:',
+    '    - "*.lan"',
+    '    - "+.local"',
+    '    - "+.market.xiaomi.com"',
+    '    - "+.msftconnecttest.com"',
+    '    - "+.msftncsi.com"',
+    '    - "localhost.ptlogin2.qq.com"',
+    '    - "+.srv.nintendo.net"',
+    '    - "+.stun.playstation.net"',
+    '    - "+.xboxlive.com"',
+    '  default-nameserver:',
+    '    - 223.5.5.5',
+    '    - 119.29.29.29',
+    '  nameserver:',
+    '    - https://223.5.5.5/dns-query',
+    '    - https://119.29.29.29/dns-query',
+    '  fallback:',
+    '    - https://1.1.1.1/dns-query',
+    '    - https://8.8.8.8/dns-query',
+    '  fallback-filter:',
+    '    geoip: true',
+    '    geoip-code: CN',
+    '    ipcidr:',
+    '      - 240.0.0.0/4',
+  ].join('\n');
+}
+
+/* 完整策略组（14 组，与 Worker 端一致）：节点名默认并入每组，避免出现空组 */
+function clashGroupsFull(names) {
+  const nodeLines = clashGroupLines(names);
+  const g = (name, first, extra) => [
+    '  - name: ' + yq(name),
+    '    type: select',
+    '    proxies:',
+    '      - ' + yq(first),
+    ...(extra || []).map(x => '      - ' + yq(x)),
+    nodeLines,
+  ].join('\n');
+  const gDirect = (name, extra) => [
+    '  - name: ' + yq(name),
+    '    type: select',
+    '    proxies:',
+    '      - DIRECT',
+    ...(extra || []).map(x => '      - ' + yq(x)),
+  ].join('\n');
+  return [
+    'proxy-groups:',
+    gDirect('🚀 节点选择', ['🎯 全球直连', ...names]),
+    g('🌍 国外媒体', '🚀 节点选择'),
+    g('📺 哔哩哔哩', '🎯 全球直连', ['🚀 节点选择']),
+    g('📹 油管视频', '🚀 节点选择'),
+    g('🎬 奈飞视频', '🚀 节点选择'),
+    g('📲 电报信息', '🚀 节点选择'),
+    g('🌐 谷歌服务', '🚀 节点选择'),
+    g('🤖 OpenAI', '🚀 节点选择'),
+    g('Ⓜ️ 微软服务', '🎯 全球直连', ['🚀 节点选择']),
+    g('🍎 苹果服务', '🎯 全球直连', ['🚀 节点选择']),
+    '  - name: ' + yq('🎯 全球直连'),
+    '    type: select',
+    '    proxies:',
+    '      - DIRECT',
+    '  - name: ' + yq('🛑 全球拦截'),
+    '    type: select',
+    '    proxies:',
+    '      - REJECT',
+    '      - DIRECT',
+    '  - name: ' + yq('🍃 应用净化'),
+    '    type: select',
+    '    proxies:',
+    '      - REJECT',
+    '      - DIRECT',
+    g('🐟 漏网之鱼', '🚀 节点选择'),
+  ].join('\n');
+}
+
+/* 精简配置的头部与策略组：体积小、无外部规则集依赖 */
+function clashHeadSlim() {
+  return [
+    '# cfnew 精简 Clash 配置（本地生成）',
+    '# 不依赖任何外部规则集，适合快速验证；完整规则集请把「配置级别」切到「完整」',
     'mixed-port: 7890',
     'allow-lan: true',
     'mode: rule',
@@ -1641,43 +1807,80 @@ function generateClashConfig() {
     '    - 119.29.29.29',
     '  nameserver:',
     '    - https://223.5.5.5/dns-query',
-    '    - https://119.29.29.29/dns-query'
-  ].join('\n'));
-  parts.push('proxies:\n' + c.text);
+    '    - https://119.29.29.29/dns-query',
+  ].join('\n');
+}
+function clashGroupsSlim(names) {
   const group = (name, first, rest) => [
     '  - name: ' + yq(name),
     '    type: select',
     '    proxies:',
     '      - ' + yq(first),
-    ...rest.map(x => '      - ' + yq(x))
+    ...(rest || []).map(x => '      - ' + yq(x)),
   ].join('\n');
-  parts.push([
+  return [
     'proxy-groups:',
     group('🚀 节点选择', '🎯 全球直连', names),
     group('🎯 全球直连', 'DIRECT', []),
     group('🛑 全球拦截', 'REJECT', ['DIRECT']),
-    '  - name: ' + yq('🐟 漏网之鱼'),
-    '    type: select',
-    '    proxies:',
-    '      - ' + yq('🚀 节点选择'),
-    '      - ' + yq('🎯 全球直连'),
-    clashGroupLines(names)
-  ].join('\n'));
-  parts.push([
-    'rules:',
-    '  - DOMAIN-SUFFIX,local,🎯 全球直连',
-    '  - IP-CIDR,127.0.0.0/8,🎯 全球直连,no-resolve',
-    '  - IP-CIDR,192.168.0.0/16,🎯 全球直连,no-resolve',
-    '  - IP-CIDR,10.0.0.0/8,🎯 全球直连,no-resolve',
-    '  - GEOIP,CN,🎯 全球直连',
-    '  - MATCH,🚀 节点选择'
-  ].join('\n'));
+    group('🐟 漏网之鱼', '🚀 节点选择', ['🎯 全球直连', ...names]),
+  ].join('\n');
+}
+const CLASH_RULES_SLIM = [
+  'rules:',
+  '  - DOMAIN-SUFFIX,local,🎯 全球直连',
+  '  - IP-CIDR,127.0.0.0/8,🎯 全球直连,no-resolve',
+  '  - IP-CIDR,192.168.0.0/16,🎯 全球直连,no-resolve',
+  '  - IP-CIDR,10.0.0.0/8,🎯 全球直连,no-resolve',
+  '  - GEOIP,CN,🎯 全球直连',
+  '  - MATCH,🚀 节点选择',
+];
+
+function generateClashConfig() {
+  const wrap = document.getElementById('clashFullWrap');
+  const stat = document.getElementById('clashFullStat');
+  const levelEl = document.getElementById('clashLevel');
+  const level = levelEl ? levelEl.value : 'full';
+  const links = document.getElementById('ol1').value.split('\n').filter(Boolean);
+  if (!links.length) {
+    stat.innerHTML = '<b class="skip">请先点「生成节点」，确认上方有输出后再生成配置。</b>';
+    wrap.style.display = 'block'; wrap.open = true;
+    document.getElementById('ocf1').value = '';
+    return;
+  }
+  const built = links.map(r => parseNode(r));
+  const c = nodesToClash(built);
+  const usable = built.filter(n => n.type === 'ws');
+  if (!usable.length) {
+    stat.innerHTML = '<b class="skip">输出里没有 WS 节点（xhttp 无法写成 Clash 代理），配置未生成。</b>';
+    wrap.style.display = 'block'; wrap.open = true;
+    document.getElementById('ocf1').value = '';
+    return;
+  }
+  const names = usable.map(n => n.name || (n.server + ':' + n.port));
+  const parts = [];
+  parts.push(level === 'full' ? clashHeadFull() : clashHeadSlim());
+  parts.push('proxies:\n' + c.text);
+  parts.push(level === 'full' ? clashGroupsFull(names) : clashGroupsSlim(names));
+  if (level === 'full') {
+    parts.push(['rule-providers:'].concat(CLASH_PROVIDERS.map(([n, b]) => [
+      '  ' + n + ':',
+      '    type: http',
+      '    behavior: ' + b,
+      '    url: "' + CLASH_RULES_BASE + '/' + n + '.txt"',
+      '    path: ./rulesets/loyalsoldier/' + n + '.txt',
+      '    interval: 86400',
+    ].join('\n'))).join('\n'));
+  }
+  parts.push(level === 'full' ? CLASH_RULES_FULL.join('\n') : CLASH_RULES_SLIM.join('\n'));
   const cfg = parts.join('\n\n') + '\n';
   document.getElementById('ocf1').value = cfg;
   wrap.style.display = 'block'; wrap.open = true;
-  stat.innerHTML = '<b class="ok">已生成完整 Clash 配置：' + usable.length + ' 个代理（' + cfg.length + ' 字符）</b>' +
+  stat.innerHTML = '<b class="ok">已生成' + (level === 'full' ? '完整' : '精简') + ' Clash 配置：' +
+    usable.length + ' 个代理、' + (level === 'full' ? 14 : 4) + ' 个策略组、' +
+    (level === 'full' ? CLASH_RULES_FULL.length - 1 : CLASH_RULES_SLIM.length - 1) + ' 条规则（' + cfg.length + ' 字符）</b>' +
     (c.skipped ? '　<b class="skip">跳过 ' + c.skipped + ' 条非 WS 节点</b>' : '') +
-    '　<b class="skip">此处用精简规则集；要机场级规则请用 ③ 的 Clash 订阅</b>';
+    (level === 'full' ? '　<b class="skip">规则集文件首次使用时由客户端从 jsDelivr 下载</b>' : '');
 }
 
 /* ============================================================
