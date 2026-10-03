@@ -57,7 +57,7 @@ const navigator = { clipboard: { writeText: t => { writes.push(t); return Promis
 
 /* ---------------- 执行被测代码 ---------------- */
 const ctx = { document, navigator, console, atob: globalThis.atob, btoa: globalThis.btoa, Blob: class {}, URL: globalThis.URL, encodeURIComponent, decodeURIComponent };
-const api = new Function(...Object.keys(ctx), code + '\n;return {parseNode,buildNode,setNodeParams,cloneNode,classify,makeName,parseList,parseListSig,parseNodesInput,genMain,openEditor,editorToNode,updatePreview,saveEditor,exportSelected,genSub,genTest,toBatch,renderTable,getqOf,generateClashConfig,nodeList:()=>nodeList};')(...Object.values(ctx));
+const api = new Function(...Object.keys(ctx), code + '\n;return {parseNode,buildNode,setNodeParams,cloneNode,classify,makeName,parseList,parseListSig,parseNodesInput,genMain,openEditor,editorToNode,updatePreview,saveEditor,exportSelected,genSub,genTest,toBatch,renderTable,getqOf,generateClashConfig,selIds,nodeList:()=>nodeList};')(...Object.values(ctx));
 
 /* ---------------- 断言 ---------------- */
 let pass = 0, fail = 0;
@@ -534,6 +534,49 @@ getEl('gen1').click();
 const selfOut2 = getEl('ol1').value.split('\n').filter(Boolean);
 ok('改为覆盖后，p 变成自己的入口 1.2.3.4:443', api.parseNode(selfOut2[0]).pp.some(([k, v]) => k === 'p' && v === '1.2.3.4:443'), JSON.stringify(api.parseNode(selfOut2[0]).pp));
 set('existMode', 'keep');
+
+/* ========== 13. 删除 xhttp 后全量导出（回归：曾因越界下标崩溃） ========== */
+sec('13. 删除节点后的全量导出');
+const MIXED = [
+  cases[0], cases[1],
+  'vless://uuid-cccc@[2001:db8::1]:443?encryption=none&security=tls&type=xhttp&path=%2Fx&sni=c.example.com#XHTTP-C',
+  'vless://uuid-dddd@9.9.9.9:8080?encryption=none&security=none&type=xhttp&path=%2Fy#XHTTP-D',
+  cases[3],
+];
+set('importArea', MIXED.join('\n'));
+getEl('clearBtn').click();
+getEl('importBtn').click();
+ok('导入 5 条（3 ws + 2 xhttp）', api.nodeList().length === 5, '实际 ' + api.nodeList().length);
+// 勾选两条 xhttp 并删除
+rowchks.length = 0;
+[[2], [3]].forEach(([i]) => { const c = mkEl('r' + i); c.dataset.i = String(i); c.checked = true; rowchks.push(c); });
+getEl('delSel').click();
+ok('删除后剩 3 条', api.nodeList().length === 3, '实际 ' + api.nodeList().length);
+ok('删除提示含实际数量与剩余', getEl('stat2').innerHTML.includes('已删除 2 条') && getEl('stat2').innerHTML.includes('剩余 3 条'), getEl('stat2').innerHTML);
+// 表格重建后不勾选任何行 → 点界面按钮应导出全部
+// 注意：必须走按钮点击，直接调 api.exportSelected() 会掩盖「按钮没绑定」这类问题
+rowchks.length = 0;
+getEl('exportBtn').click();
+ok('导出按钮已绑定到导出逻辑', getEl('out2').style.display === 'block', '导出区未显示，说明按钮没触发');
+let ex = getEl('ol2').value.split('\n').filter(Boolean);
+ok('未勾选 → 导出全部 3 条', ex.length === 3, '实际 ' + ex.length + '：' + getEl('stat2').innerHTML);
+ok('剩下的都是 ws 节点', ex.every(l => !l.includes('xhttp')), ex.join('\n'));
+ok('提示说明是「全部」', getEl('stat2').innerHTML.includes('已导出全部'), getEl('stat2').innerHTML);
+// 越界下标（删除后残留）不得再导致崩溃
+rowchks.length = 0;
+[0, 1, 2, 3, 4, 9].forEach(i => { const c = mkEl('x' + i); c.dataset.i = String(i); c.checked = true; rowchks.push(c); });
+let crashed = false;
+try { getEl('exportBtn').click(); } catch (e) { crashed = true; }
+ok('越界下标不再让导出崩溃', !crashed);
+ok('越界下标被忽略，仍导出有效行', getEl('ol2').value.split('\n').filter(Boolean).length === 3, getEl('ol2').value);
+ok('selIds 过滤越界与重复', api.selIds().length === 3, JSON.stringify(api.selIds()));
+// 筛选状态提示
+getEl('search').value = 'WS节点';
+api.renderTable();
+getEl('exportBtn').click();
+ok('筛选时提示说明只显示部分', getEl('stat2').innerHTML.includes('当前筛选只显示'), getEl('stat2').innerHTML);
+getEl('search').value = '';
+api.renderTable();
 
 console.log('\n================ 结果: PASS ' + pass + ' / FAIL ' + fail + ' ================');
 process.exit(fail ? 1 : 0);

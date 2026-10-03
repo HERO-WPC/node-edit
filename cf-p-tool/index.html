@@ -521,8 +521,14 @@
     </div>
 
     <div class="stat" id="stat2"></div>
+
+    <div class="opts" style="margin:14px 0 0">
+      <button class="btn" id="exportBtn">导出所选到下方</button>
+      <span class="hint" style="margin:0">未勾选任何行 = 导出列表<b>全部</b>节点（不受搜索/筛选影响）</span>
+    </div>
+
     <div class="out" id="out2" style="display:none">
-      <h2>导出所选
+      <h2>导出结果
         <button class="btn mini" id="copyL2">复制链接</button>
         <button class="btn mini" id="copyB2">复制 base64</button>
         <button class="btn mini" id="copyC2">复制 Clash</button>
@@ -1254,8 +1260,18 @@ function renderTable() {
   }
   document.getElementById('listCount').textContent = '共 ' + nodeList.length + ' 条，显示 ' + rows.length + ' 条';
 }
+/* 读取当前勾选的行下标。必须过滤越界值：删除节点后 DOM 里的复选框可能残留，
+   越界下标会让 nodeList[i] 变成 undefined，进而使导出直接抛异常、什么都导不出来。 */
 function selIds() {
-  return Array.from(document.querySelectorAll('.rowchk:checked')).map(c => parseInt(c.dataset.i, 10));
+  const seen = new Set();
+  const out = [];
+  for (const c of document.querySelectorAll('.rowchk:checked')) {
+    const i = parseInt(c.dataset.i, 10);
+    if (!Number.isInteger(i) || i < 0 || i >= nodeList.length || seen.has(i)) continue;
+    seen.add(i);
+    out.push(i);
+  }
+  return out;
 }
 function showStat2(html) { document.getElementById('stat2').innerHTML = html; }
 
@@ -1417,7 +1433,9 @@ function sendToBatch() {
 }
 function exportSelected() {
   const ids = selIds();
-  const picked = (ids.length ? ids : nodeList.map((_, i) => i)).map(i => nodeList[i]);
+  const picked = (ids.length ? ids : nodeList.map((_, i) => i))
+    .map(i => nodeList[i])
+    .filter(Boolean);                       // 再兜一层，任何情况下都不让导出崩掉
   if (!picked.length) { showStat2('<b class="skip">列表为空。</b>'); return; }
   const links = picked.map(buildNode);
   document.getElementById('ol2').value = links.join('\n');
@@ -1426,7 +1444,11 @@ function exportSelected() {
   document.getElementById('oc2').value = c.text;
   document.getElementById('os2').value = sb.text;
   document.getElementById('out2').style.display = 'block';
+  const shown = filteredNodes().length;
   showStat2('<b class="ok">导出 ' + picked.length + ' 条</b>' +
+    (ids.length ? '　<b class="skip">（仅勾选的 ' + ids.length + ' 条；不勾选则导出全部 ' + nodeList.length + ' 条）</b>'
+                : '　<b class="skip">未勾选任何行 → 已导出全部</b>') +
+    (shown < nodeList.length ? '　<b class="skip">当前筛选只显示 ' + shown + ' / ' + nodeList.length + ' 条，「全选/反选」只作用于筛选结果</b>' : '') +
     (c.skipped ? '　<b class="skip">Clash/sing-box 未含 ' + c.skipped + ' 条（非 ws）</b>' : ''));
 }
 
@@ -1635,6 +1657,7 @@ document.getElementById('toBatch').onclick = toBatch;
 
 /* ② 事件 */
 document.getElementById('importBtn').onclick = importNodes;
+document.getElementById('exportBtn').onclick = exportSelected;
 document.getElementById('sendToBatch').onclick = sendToBatch;
 document.getElementById('sendToBatch2').onclick = sendToBatch;
 document.getElementById('clashExport').onclick = exportClashYaml;
@@ -1679,10 +1702,12 @@ document.getElementById('selAll').onclick = () => {
 document.getElementById('delSel').onclick = () => {
   const ids = selIds();
   if (!ids.length) { showStat2('<b class="skip">未勾选节点。</b>'); return; }
+  const before = nodeList.length;
   nodeList = nodeList.filter((_, i) => !ids.includes(i));
   editingIdx = -1; document.getElementById('editor').style.display = 'none';
   renderTable();
-  showStat2('<b class="ok">已删除 ' + ids.length + ' 条</b>');
+  showStat2('<b class="ok">已删除 ' + (before - nodeList.length) + ' 条</b>' +
+    '　<b class="skip">剩余 ' + nodeList.length + ' 条</b>');
 };
 document.getElementById('bApply').onclick = () => {
   const ids = selIds();
