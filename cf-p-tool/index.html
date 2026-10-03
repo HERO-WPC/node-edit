@@ -391,12 +391,22 @@
         <button class="btn mini" id="copyC1">复制 Clash</button>
         <button class="btn mini" id="copyS1">复制 sing-box</button>
         <button class="btn mini" id="dl1">下载 .txt</button>
+        <button class="btn mini" id="genClash1">生成完整 Clash 配置</button>
       </h2>
       <div class="sample" id="sample1"></div>
       <textarea id="ol1" spellcheck="false"></textarea>
       <details><summary>base64 订阅</summary><textarea id="ob1" spellcheck="false" style="height:90px"></textarea></details>
       <details><summary>Clash / mihomo 配置片段（proxies:）</summary><textarea id="oc1" spellcheck="false" style="height:150px"></textarea></details>
       <details><summary>sing-box 配置片段（outbounds:）</summary><textarea id="os1" spellcheck="false" style="height:150px"></textarea></details>
+      <details id="clashFullWrap" style="display:none">
+        <summary>完整 Clash 配置（可直接导入客户端 / 存为 config.yaml）</summary>
+        <div class="stat" id="clashFullStat" style="margin:8px 0 4px"></div>
+        <div class="opts" style="margin:0 0 6px">
+          <button class="btn mini" id="copyCF1">复制完整配置</button>
+          <button class="btn mini" id="dlCF1">下载 config.yaml</button>
+        </div>
+        <textarea id="ocf1" spellcheck="false" style="height:240px" readonly></textarea>
+      </details>
     </div>
   </div>
 
@@ -405,12 +415,12 @@
     <div class="step">导入节点</div>
     <div class="grid">
       <div>
-        <textarea id="importArea" placeholder="粘贴 vless:// trojan:// 链接（多行）或整段 base64 订阅，点「导入」" style="height:90px"></textarea>
+        <textarea id="importArea" placeholder="粘贴 vless:// trojan:// 链接（多行）、整段 base64 订阅，或一整份 Clash 配置 YAML（自动识别，仅解析 proxies: 区块）" style="height:90px"></textarea>
       </div>
       <div class="opts" style="align-content:flex-start">
         <button class="btn" id="importBtn">导入节点</button>
         <button class="btn gray" id="clearBtn">清空列表</button>
-        <span class="hint">重复导入会按链接去重。仅解析 VLESS / Trojan。</span>
+        <span class="hint">重复导入会按链接去重。链接仅解析 VLESS / Trojan；YAML 会连同其余区块一起记住，可原样写回。</span>
       </div>
     </div>
 
@@ -432,6 +442,19 @@
         </tr></thead>
         <tbody id="nodeBody"></tbody>
       </table>
+    </div>
+
+    <div class="srcbox" id="clashOutBox" style="display:none;margin-top:12px">
+      <div class="cap">写回 Clash YAML</div>
+      <div class="opts" style="margin:4px 0">
+        <button class="btn mini" id="clashExport">导出 Clash YAML</button>
+        <button class="btn mini" id="clashCopy">复制 YAML</button>
+        <button class="btn mini" id="clashDl">下载 config.yaml</button>
+        <button class="btn mini" id="sendToBatch2">把节点送去 ① 批量处理</button>
+      </div>
+      <div class="stat" id="clashOutStat" style="margin:6px 0 4px"></div>
+      <textarea id="clashOut" spellcheck="false" style="height:220px" readonly></textarea>
+      <div class="hint">只替换顶层 <code>proxies:</code> 区块，<code>proxy-groups / rules / dns</code> 等其余内容逐字节保留；无法用 Clash 表示的协议（vmess、hysteria2 等）按原文保留。</div>
     </div>
 
     <div class="srcbox" id="batchBox" style="margin-top:12px">
@@ -505,6 +528,7 @@
         <button class="btn mini" id="copyC2">复制 Clash</button>
         <button class="btn mini" id="copyS2">复制 sing-box</button>
         <button class="btn mini" id="dl2">下载 .txt</button>
+        <button class="btn mini" id="sendToBatch">送去 ① 批量处理</button>
       </h2>
       <textarea id="ol2" spellcheck="false"></textarea>
       <details><summary>base64 订阅</summary><textarea id="ob2" spellcheck="false" style="height:90px"></textarea></details>
@@ -518,7 +542,7 @@
     <div class="grid">
       <div>
         <h2>订阅基地址（每行一条）</h2>
-        <textarea id="subs" placeholder="https://你的worker域名/你的UUID/sub" style="height:110px"></textarea>
+        <textarea id="subs" placeholder="https://你的worker域名/你的UUID/sub&#10;轻量版同款：https://你的worker域名/你的UUID&#10;（工具会自动补 /sub 与 target 参数）" style="height:110px"></textarea>
       </div>
       <div>
         <h2>参数列表（每行一个，可带标签）</h2>
@@ -533,14 +557,30 @@
         <option value="p">p 反代IP</option><option value="s">s SOCKS5代理</option>
         <option value="wk">wk 地区筛选</option><option value="rm">rm 移除地区</option>
       </select>
-      <label>target <input type="text" id="target" placeholder="clash / singbox / surge…" style="width:130px"></label>
+      <label>客户端类型 <select id="clientType">
+        <option value="">base64（通用 / v2rayNG）</option>
+        <option value="clash" selected>Clash / mihomo</option>
+        <option value="clashr">ClashR</option>
+        <option value="stash">Stash</option>
+        <option value="singbox">sing-box</option>
+        <option value="surge">Surge</option>
+        <option value="loon">Loon</option>
+        <option value="quanx">Quantumult X</option>
+        <option value="vg">CLASH 家宽链式</option>
+      </select></label>
+      <label>target 覆盖 <input type="text" id="target" placeholder="留空则用左侧选择" style="width:130px"></label>
     </div>
     <div class="hint" style="margin:-4px 0 10px">订阅层 <code>wk</code>=只输出指定地区优选、<code>rm</code>=移除地区（与节点层含义不同）。订阅模式对 xhttp 节点同样有效。</div>
-    <button class="btn" id="gen3">生成订阅链接</button>
+    <div class="opts">
+      <button class="btn" id="gen3">生成订阅链接</button>
+      <button class="btn gray" id="clashOnly">只要 Clash 订阅 →</button>
+      <span class="hint" style="margin:0">Worker 端 <code>?target=clash</code> 返回的是<b>完整配置</b>（含 proxy-groups 与规则），可直接粘进 Clash 当订阅。</span>
+    </div>
     <div class="stat" id="stat3"></div>
     <div class="out" id="out3" style="display:none">
       <h2>输出
         <button class="btn mini" id="copyL3">复制</button>
+        <button class="btn mini" id="copyC3">复制 Clash 订阅链接</button>
         <button class="btn mini" id="dl3">下载 .txt</button>
       </h2>
       <textarea id="ol3" spellcheck="false"></textarea>
@@ -817,6 +857,8 @@ function nodeToClashObj(n) {
   } else return null; // 仅 ws
   return o;
 }
+/* 输出合法的 YAML 序列：每项以 "- name:" 开头，同项后续键缩进 2 空格。
+   列表标记不能省——缺了它 proxies 就不是序列，Clash 会直接解析失败。 */
 function clashObjsToYaml(objs) {
   const blocks = [];
   for (const o of objs) {
@@ -835,6 +877,134 @@ function clashObjsToYaml(objs) {
   return blocks.join('\n');
 }
 function yq(v) { return '"' + String(v).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"'; }
+
+/* ============================================================
+   Clash YAML 导入 / 导出
+   策略：只定点替换顶层 proxies: 区块，其余内容逐字节保留，
+        不做整份 YAML 解析与重写（避免破坏注释、锚点与格式）。
+   ============================================================ */
+function unquote(v) {
+  v = String(v).trim();
+  if ((v.startsWith('"') && v.endsWith('"') && v.length > 1) ||
+      (v.startsWith("'") && v.endsWith("'") && v.length > 1)) return v.slice(1, -1);
+  return v;
+}
+/* 定位顶层 "proxies:" 区块，返回块内文本（不含该键行）、基准缩进以及首尾原文 */
+function splitProxiesBlock(text) {
+  const lines = text.split('\n');
+  let start = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (/^proxies:\s*(#.*)?$/.test(lines[i])) { start = i; break; }
+  }
+  if (start < 0) return null;
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i++) {
+    const l = lines[i];
+    if (!l.trim()) continue;
+    const indent = l.length - l.replace(/^\s+/, '').length;
+    // 下一个顶层键（列 0 且不是序列项）即区块结束
+    if (indent === 0 && !/^-/.test(l.trim())) { end = i; break; }
+  }
+  const head = lines.slice(0, start + 1).join('\n');
+  const body = lines.slice(start + 1, end);
+  const tail = lines.slice(end).join('\n');
+  const baseIndent = body.reduce((acc, l) => {
+    if (acc !== null || !l.trim()) return acc;
+    return l.length - l.replace(/^\s+/, '').length;
+  }, null) || 0;
+  return { head, body, tail, baseIndent };
+}
+/* 解析 proxies 区块 → { nodes, raw }：可识别的协议转成节点对象，其余原样保留 */
+function parseProxiesBlock(body, baseIndent) {
+  const items = [];
+  let cur = null;
+  for (const line of body) {
+    if (!line.trim() || /^\s*#/.test(line)) continue;
+    const indent = line.length - line.replace(/^\s+/, '').length;
+    const t = line.trim();
+    if (indent === baseIndent && t.startsWith('- ')) {
+      cur = { lines: [line], vals: {}, maps: [{ indent: baseIndent, node: null }] };
+      items.push(cur);
+      // 序列项的第一个键属于该项自身，缩进视为 baseIndent
+      const body2 = t.slice(2);
+      const m = body2.match(/^([\w-]+):\s*(.*)$/);
+      if (m) {
+        if (m[2] === '') { cur.vals[m[1]] = {}; cur.maps.push({ indent: baseIndent, node: cur.vals[m[1]] }); }
+        else cur.vals[m[1]] = unquote(m[2]);
+      }
+      continue;
+    }
+    if (!cur) continue;
+    cur.lines.push(line);
+    // 收缩到当前缩进所属的嵌套映射
+    while (cur.maps.length > 1 && indent < cur.maps[cur.maps.length - 1].indent) cur.maps.pop();
+    const target = cur.maps[cur.maps.length - 1].node || cur.vals;
+    const m = t.match(/^([\w-]+):\s*(.*)$/);
+    if (!m) continue;
+    if (m[2] === '') {
+      target[m[1]] = {};
+      cur.maps.push({ indent, node: target[m[1]] });
+    } else target[m[1]] = unquote(m[2]);
+  }
+  const nodes = [], raw = [], unsupported = [];
+  for (const it of items) {
+    const v = it.vals;
+    const proto = String(v.type || '').toLowerCase();
+    if (proto !== 'vless' && proto !== 'trojan') {
+      raw.push(it.lines.join('\n'));
+      unsupported.push(v.name || proto || '(未命名)');
+      continue;
+    }
+    const wo = (v['ws-opts'] && typeof v['ws-opts'] === 'object') ? v['ws-opts'] : {};
+    const rawPath = wo.path || '/';
+    const qi = rawPath.indexOf('?');
+    const pPath = qi > -1 ? rawPath.slice(0, qi) : rawPath;
+    const pp = [];
+    if (qi > -1) for (const kv of rawPath.slice(qi + 1).split('&')) {
+      if (!kv) continue;
+      const eq = kv.indexOf('=');
+      // 保留 path 内全部参数（ed、mode 等非 cfnew 参数同样不能丢），展示时再过滤
+      pp.push([kv.slice(0, eq), eq > -1 ? dec(kv.slice(eq + 1)) : '']);
+    }
+    const network = String(v.network || '').toLowerCase();
+    const portNum = parseInt(v.port, 10);
+    nodes.push({
+      scheme: proto,
+      auth: (proto === 'vless' ? v.uuid : v.password) || '',
+      server: String(v.server || ''),
+      port: isNaN(portNum) ? 443 : portNum,
+      name: v.name || (v.server + ':' + v.port),
+      q: [
+        ['encryption', 'none'],
+        ['security', v.tls === 'true' || v.tls === '1' ? 'tls' : 'none'],
+        ['sni', v.servername || ''],
+        ['type', network === 'ws' ? 'ws' : (network || 'ws')],
+        ['host', (wo.headers && wo.headers.Host) || ''],
+        ['path', rawPath]
+      ],
+      raw: '',
+      type: network || 'ws',
+      security: v.tls === 'true' || v.tls === '1' ? 'tls' : '',
+      sni: v.servername || '',
+      host: (wo.headers && wo.headers.Host) || '',
+      fp: v['client-fingerprint'] || '',
+      alpn: Array.isArray(v.alpn) ? v.alpn.join(',') : (v.alpn || ''),
+      mode: '',
+      extra: '',
+      pPath,
+      pp,
+      _src: 'clash'
+    });
+  }
+  return { nodes, raw, unsupported };
+}
+function clashYamlState(text) {
+  const split = splitProxiesBlock(text);
+  if (!split) return null;
+  const parsed = parseProxiesBlock(split.body, split.baseIndent);
+  if (!parsed.nodes.length && !parsed.raw.length) return null;
+  return { ...split, ...parsed };
+}
 function nodesToClash(nodes) {
   const objs = nodes.map(nodeToClashObj).filter(Boolean);
   return { text: clashObjsToYaml(objs), skipped: nodes.length - objs.length };
@@ -1012,8 +1182,37 @@ function getqOf(link, key) {
 let nodeList = [];   // 节点对象数组
 let editingIdx = -1; // 当前编辑索引
 
+let clashSession = null;   // 上次导入的 Clash 配置上下文（用于把编辑结果写回 YAML）
+
+/* 判断导入内容是否是 Clash 配置：顶层存在 proxies: 且能解析出条目 */
+function looksLikeClashYaml(text) {
+  if (!/^\s*proxies:\s*$/m.test(text)) return false;
+  return !!clashYamlState(text);
+}
+function importClashYaml(text) {
+  const st = clashYamlState(text);
+  if (!st) return false;
+  let added = 0, dup = 0;
+  for (const n of st.nodes) {
+    n._id = 'clash:' + n.name + '|' + n.server + ':' + n.port;
+    if (nodeList.some(x => x._id === n._id)) { dup++; continue; }
+    nodeList.push(n); added++;
+  }
+  clashSession = { head: st.head, tail: st.tail, raw: st.raw, unsupported: st.unsupported };
+  const box = document.getElementById('clashOutBox');
+  if (box) box.style.display = '';
+  showStat2('<b class="ok">已从 Clash 配置导入 ' + added + ' 条</b>' +
+    (dup ? '　<b class="skip">重复 ' + dup + ' 条</b>' : '') +
+    (st.unsupported.length ? '　<b class="skip">' + st.unsupported.length + ' 条非 VLESS/Trojan 将原样保留：' + esc(st.unsupported.slice(0, 4).join('、')) + (st.unsupported.length > 4 ? '…' : '') + '</b>' : '') +
+    '　<b class="ok">改完后可用下方「导出 Clash YAML」写回，proxies 以外的内容保持不变</b>');
+  renderTable();
+  return true;
+}
 function importNodes() {
-  const lines = parseNodesInput(document.getElementById('importArea').value);
+  const box = document.getElementById('importArea');
+  const text = box.value;
+  if (looksLikeClashYaml(text)) { importClashYaml(text); box.value = ''; return; }
+  const lines = parseNodesInput(text);
   let added = 0, dup = 0, unsup = 0;
   for (const l of lines) {
     const sch = l.slice(0, l.indexOf(':')).toLowerCase();
@@ -1177,6 +1376,45 @@ function saveEditor() {
   openEditor(editingIdx);
 }
 
+function exportClashYaml() {
+  const stat = document.getElementById('clashOutStat');
+  if (!clashSession) {
+    stat.innerHTML = '<b class="skip">还没有导入过 Clash 配置，无法写回。请先在上方粘贴一份含 proxies: 的 YAML 导入。</b>';
+    return;
+  }
+  const editable = nodeList.filter(n => n._src === 'clash');
+  const built = editable.map(buildNode);
+  const objs = built.map(r => parseNode(r)).map(nodeToClashObj).filter(Boolean);
+  const unsupportedCount = clashSession.raw.length;
+  const skipped = editable.length - objs.length;
+  if (!objs.length && !unsupportedCount) {
+    stat.innerHTML = '<b class="skip">没有可写出的节点（xhttp 无法表示为 Clash 代理）。</b>';
+    return;
+  }
+  const blocks = [];
+  if (objs.length) blocks.push(clashObjsToYaml(objs));
+  if (unsupportedCount) blocks.push(clashSession.raw.join('\n'));
+  const yaml = blocks.join('\n');
+  const out = clashSession.head + '\n' + yaml + (yaml.endsWith('\n') ? '' : '\n') + clashSession.tail;
+  document.getElementById('clashOut').value = out;
+  stat.innerHTML = '<b class="ok">已写回 ' + objs.length + ' 条节点</b>' +
+    (unsupportedCount ? '　<b class="ok">原样保留 ' + unsupportedCount + ' 条其它协议</b>' : '') +
+    (skipped ? '　<b class="skip">跳过 ' + skipped + ' 条（非 ws，Clash 无法表示）</b>' : '') +
+    '　<b class="ok">proxies 以外的内容未改动</b>';
+}
+
+/* 把当前列表（含 YAML 导入的节点）转成链接送进 ①，供「入口 IP 自动作为 ProxyIP」等模式使用 */
+function sendToBatch() {
+  if (!nodeList.length) { showStat2('<b class="skip">列表为空，先导入节点。</b>'); return; }
+  const links = nodeList.map(buildNode).filter(Boolean);
+  const xhttp = nodeList.filter(n => n.type === 'xhttp' || n.type === 'splithttp').length;
+  document.getElementById('nodes').value = links.join('\n');
+  document.querySelector('.tab[data-t="1"]').click();
+  document.getElementById('nodes').focus();
+  showStat2('<b class="ok">已把 ' + links.length + ' 条节点送去 ①</b>' +
+    (xhttp ? '　<b class="skip">其中 ' + xhttp + ' 条 xhttp 在 ① 里会被跳过或原样保留</b>' : '') +
+    '　<b class="ok">如需「入口 IP 自动作为 ProxyIP」，在 ① 选中该模式后点生成即可</b>');
+}
 function exportSelected() {
   const ids = selIds();
   const picked = (ids.length ? ids : nodeList.map((_, i) => i)).map(i => nodeList[i]);
@@ -1199,31 +1437,143 @@ function genSub() {
   const subs = document.getElementById('subs').value.split('\n').map(s => s.trim()).filter(Boolean);
   const list = parseListSig(document.getElementById('plist3').value);
   const keySel = document.getElementById('pkey3').value;
-  const target = document.getElementById('target').value.trim();
+  const target = (document.getElementById('target').value.trim() || document.getElementById('clientType').value).toLowerCase();
   const stat = document.getElementById('stat3'), out = document.getElementById('out3');
   if (!subs.length || !list.length) {
     stat.innerHTML = '<b class="skip">请同时填入订阅地址和参数列表。</b>'; out.style.display = 'none'; return;
   }
   const results = [];
-  let withKey = 0;
+  let withKey = 0, fixedCount = 0;
   for (const base0 of subs) {
-    const base = base0.replace(/[?&]+$/, '');
-    const sep = base.includes('?') ? '&' : '?';
+    const r = normalizeSubBase(base0);
+    fixedCount += r.fixed;
+    const sep = r.base.includes('?') ? '&' : '?';
     for (const item of list) {
       const params = [];                                  // [[键, 值], ...] 按顺序拼接
       const key = keySel !== 'auto' ? keySel : (item.key || classify(item.value));
       params.push([key, item.value]);
       for (const [k, v] of (item.extra || [])) if (!params.some(x => x[0] === k)) params.push([k, v]);
-      if (target && !params.some(([k]) => k === 'target')) params.push(['target', target]);
+      // target 只作为订阅级参数出现一次；参数里已显式带了就不再追加
+      if (target && !params.some(([k]) => k === 'target') && !r.hasTarget) params.push(['target', target]);
       if (item.key && keySel === 'auto') withKey++;
       results.push('cfnew-' + (item.remark || item.value) + '  ' +
-        base + sep + params.map(([k, v]) => k + '=' + encodeURIComponent(v)).join('&'));
+        r.base + sep + params.map(([k, v]) => k + '=' + encodeURIComponent(v)).join('&'));
     }
   }
   document.getElementById('ol3').value = results.join('\n');
   out.style.display = 'block';
   stat.innerHTML = '<b class="ok">' + subs.length + ' 条订阅 × ' + list.length + ' 个参数 → ' + results.length + ' 条（带标签）</b>' +
+    (target ? '　<b class="ok">客户端类型：' + esc(target) + '</b>' : '') +
+    (fixedCount ? '　<b class="ok">已自动补全 ' + fixedCount + ' 条订阅地址</b>' : '') +
     (withKey ? '　<b class="ok">其中 ' + withKey + ' 条按「标签 | 参数」显式指定了键</b>' : '');
+}
+
+/* 规范化订阅基地址：
+   - 没有 /sub 结尾且没有 target 参数的，补上 /sub（cfnew 完整版订阅端点为 /{uuid}/sub）
+   - 已带 target= 的视为用户显式指定，不再追加 */
+function normalizeSubBase(raw) {
+  let base = String(raw).trim().replace(/[?&]+$/, '');
+  let fixed = 0, hasTarget = false;
+  const qi = base.indexOf('?');
+  const pathPart = qi > -1 ? base.slice(0, qi) : base;
+  const queryPart = qi > -1 ? base.slice(qi + 1) : '';
+  if (queryPart) hasTarget = /(?:^|&)target=/i.test(queryPart);
+  // /sub 只在「没有查询串」且路径末段不是 sub 时补，避免破坏已自定义的路径
+  if (!hasTarget && !queryPart && !/\/sub$/i.test(pathPart)) {
+    base = pathPart.replace(/\/+$/, '') + '/sub';
+    fixed = 1;
+  }
+  return { base, fixed, hasTarget };
+}
+
+/* ============================================================
+   ① 附：生成完整 Clash 配置（结构对齐 Worker 端 生成值值589）
+   ============================================================ */
+function clashGroupLines(names) {
+  return names.map(n => '      - ' + yq(n)).join('\n');
+}
+function generateClashConfig() {
+  const wrap = document.getElementById('clashFullWrap');
+  const stat = document.getElementById('clashFullStat');
+  const links = document.getElementById('ol1').value.split('\n').filter(Boolean);
+  if (!links.length) {
+    stat.innerHTML = '<b class="skip">请先在上方点「生成节点」，确认已有输出后再生成配置。</b>';
+    wrap.style.display = 'block'; wrap.open = true;
+    document.getElementById('ocf1').value = '';
+    return;
+  }
+  const built = links.map(r => parseNode(r));
+  const c = nodesToClash(built);
+  const usable = built.filter(n => n.type === 'ws');
+  if (!usable.length) {
+    stat.innerHTML = '<b class="skip">输出里没有 WS 节点（xhttp 无法写成 Clash 代理），完整配置未生成。</b>';
+    wrap.style.display = 'block'; wrap.open = true;
+    document.getElementById('ocf1').value = '';
+    return;
+  }
+  const names = usable.map(n => n.name || (n.server + ':' + n.port));
+  const parts = [];
+  parts.push([
+    '# cfnew 完整 Clash 配置（本地生成，供校验 / 自建订阅用）',
+    '# 与 Worker 端 ?target=clash 同构；需要自动更新的订阅链接请用「③ 订阅参数生成」',
+    'mixed-port: 7890',
+    'allow-lan: true',
+    'mode: rule',
+    'log-level: info',
+    'ipv6: true',
+    'external-controller: 127.0.0.1:9090',
+    'unified-delay: true',
+    'tcp-concurrent: true',
+    'dns:',
+    '  enable: true',
+    '  ipv6: true',
+    '  enhanced-mode: fake-ip',
+    '  fake-ip-range: 198.18.0.1/16',
+    '  fake-ip-filter:',
+    '    - "*.lan"',
+    '    - "+.local"',
+    '  default-nameserver:',
+    '    - 223.5.5.5',
+    '    - 119.29.29.29',
+    '  nameserver:',
+    '    - https://223.5.5.5/dns-query',
+    '    - https://119.29.29.29/dns-query'
+  ].join('\n'));
+  parts.push('proxies:\n' + c.text);
+  const group = (name, first, rest) => [
+    '  - name: ' + yq(name),
+    '    type: select',
+    '    proxies:',
+    '      - ' + yq(first),
+    ...rest.map(x => '      - ' + yq(x))
+  ].join('\n');
+  parts.push([
+    'proxy-groups:',
+    group('🚀 节点选择', '🎯 全球直连', names),
+    group('🎯 全球直连', 'DIRECT', []),
+    group('🛑 全球拦截', 'REJECT', ['DIRECT']),
+    '  - name: ' + yq('🐟 漏网之鱼'),
+    '    type: select',
+    '    proxies:',
+    '      - ' + yq('🚀 节点选择'),
+    '      - ' + yq('🎯 全球直连'),
+    clashGroupLines(names)
+  ].join('\n'));
+  parts.push([
+    'rules:',
+    '  - DOMAIN-SUFFIX,local,🎯 全球直连',
+    '  - IP-CIDR,127.0.0.0/8,🎯 全球直连,no-resolve',
+    '  - IP-CIDR,192.168.0.0/16,🎯 全球直连,no-resolve',
+    '  - IP-CIDR,10.0.0.0/8,🎯 全球直连,no-resolve',
+    '  - GEOIP,CN,🎯 全球直连',
+    '  - MATCH,🚀 节点选择'
+  ].join('\n'));
+  const cfg = parts.join('\n\n') + '\n';
+  document.getElementById('ocf1').value = cfg;
+  wrap.style.display = 'block'; wrap.open = true;
+  stat.innerHTML = '<b class="ok">已生成完整 Clash 配置：' + usable.length + ' 个代理（' + cfg.length + ' 字符）</b>' +
+    (c.skipped ? '　<b class="skip">跳过 ' + c.skipped + ' 条非 WS 节点</b>' : '') +
+    '　<b class="skip">此处用精简规则集；要机场级规则请用 ③ 的 Clash 订阅</b>';
 }
 
 /* ============================================================
@@ -1266,17 +1616,40 @@ document.querySelectorAll('input[name=src]').forEach(r => r.onchange = () => {
   document.getElementById('lineBox').style.display = src === 'line' ? '' : 'none';
   document.getElementById('colList').style.display = src === 'self' ? 'none' : '';
   document.getElementById('listCap').textContent = src === 'self'
-    ? '取每条节点 @后面的 IP:端口，直接作为它自己的 ProxyIP（入口地址即反代地址）'
+    ? '取每条节点 @后面的 IP:端口，直接作为它自己的 ProxyIP（入口地址即反代地址）。注意：节点地址若已是 CF 边缘/优选 IP，出站仍会再绕一层，仅适合「地址就是真实入口」的直连节点'
     : '每条节点 × 每行 ProxyIP 全组合输出 —— 铺开测速找最快反代';
 });
 document.getElementById('gen1').onclick = genMain;
 document.getElementById('gen3').onclick = genSub;
+document.getElementById('genClash1').onclick = generateClashConfig;
+document.getElementById('clashOnly').onclick = () => {
+  // 只要 Clash 订阅：把客户端类型切到 clash 并生成
+  document.getElementById('clientType').value = 'clash';
+  document.getElementById('target').value = '';
+  genSub();
+  const ol3 = document.getElementById('ol3').value;
+  if (ol3) navigator.clipboard.writeText(ol3);
+};
 document.getElementById('genT').onclick = genTest;
 document.getElementById('toBatch').onclick = toBatch;
 
 /* ② 事件 */
 document.getElementById('importBtn').onclick = importNodes;
-document.getElementById('clearBtn').onclick = () => { nodeList = []; editingIdx = -1; document.getElementById('editor').style.display = 'none'; document.getElementById('out2').style.display = 'none'; renderTable(); showStat2(''); };
+document.getElementById('sendToBatch').onclick = sendToBatch;
+document.getElementById('sendToBatch2').onclick = sendToBatch;
+document.getElementById('clashExport').onclick = exportClashYaml;
+document.getElementById('clashCopy').onclick = () => {
+  const v = document.getElementById('clashOut').value;
+  if (v) navigator.clipboard.writeText(v);
+};
+document.getElementById('clashDl').onclick = () => {
+  const v = document.getElementById('clashOut').value;
+  if (!v) return;
+  const blob = new Blob([v], { type: 'text/yaml;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = 'config.yaml'; a.click();
+};
+document.getElementById('clearBtn').onclick = () => { nodeList = []; clashSession = null; editingIdx = -1; document.getElementById('editor').style.display = 'none'; document.getElementById('out2').style.display = 'none'; document.getElementById('clashOutBox').style.display = 'none'; document.getElementById('clashOut').value = ''; document.getElementById('clashOutStat').innerHTML = ''; renderTable(); showStat2(''); };
 document.getElementById('search').oninput = renderTable;
 document.getElementById('fProto').onchange = renderTable;
 document.getElementById('fTrans').onchange = renderTable;
@@ -1376,9 +1749,16 @@ function dl(srcId, name) {
 }
 /* ① 输出按钮 */
 bindCopy('copyL1', 'ol1'); bindCopy('copyB1', 'ob1'); bindCopy('copyC1', 'oc1'); bindCopy('copyS1', 'os1');
-bindCopy('copyL3', 'ol3');
+bindCopy('copyL3', 'ol3'); bindCopy('copyC3', 'ol3'); bindCopy('copyCF1', 'ocf1');
 document.getElementById('dl1').onclick = () => dl('ol1', 'nodes_with_params.txt');
 document.getElementById('dl3').onclick = () => dl('ol3', 'sub_urls.txt');
+document.getElementById('dlCF1').onclick = () => {
+  const cfg = document.getElementById('ocf1').value;
+  if (!cfg) return;
+  const blob = new Blob([cfg], { type: 'text/yaml;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = 'config.yaml'; a.click();
+};
 function bindCopy(btnId, srcId) {
   document.getElementById(btnId).onclick = () => navigator.clipboard.writeText(document.getElementById(srcId).value);
 }

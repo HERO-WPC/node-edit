@@ -57,7 +57,7 @@ const navigator = { clipboard: { writeText: t => { writes.push(t); return Promis
 
 /* ---------------- 执行被测代码 ---------------- */
 const ctx = { document, navigator, console, atob: globalThis.atob, btoa: globalThis.btoa, Blob: class {}, URL: globalThis.URL, encodeURIComponent, decodeURIComponent };
-const api = new Function(...Object.keys(ctx), code + '\n;return {parseNode,buildNode,setNodeParams,cloneNode,classify,makeName,parseList,parseListSig,parseNodesInput,genMain,openEditor,editorToNode,updatePreview,saveEditor,exportSelected,genSub,genTest,toBatch,renderTable,getqOf,nodeList:()=>nodeList};')(...Object.values(ctx));
+const api = new Function(...Object.keys(ctx), code + '\n;return {parseNode,buildNode,setNodeParams,cloneNode,classify,makeName,parseList,parseListSig,parseNodesInput,genMain,openEditor,editorToNode,updatePreview,saveEditor,exportSelected,genSub,genTest,toBatch,renderTable,getqOf,generateClashConfig,nodeList:()=>nodeList};')(...Object.values(ctx));
 
 /* ---------------- 断言 ---------------- */
 let pass = 0, fail = 0;
@@ -337,6 +337,203 @@ getEl('copyL2').onclick(); getEl('copyB2').onclick(); getEl('copyC2').onclick();
 getEl('copyL3').onclick();
 ok('9 个复制按钮均写入剪贴板', writes.length - before9 === 9, '实际 ' + (writes.length - before9));
 ok('复制内容非空', writes.slice(before9).every(w => w && w.length > 0));
+
+/* ========== 10. Clash 订阅链接与完整配置 ========== */
+sec('10. Clash 订阅');
+// 客户端类型默认 clash；基地址未带 /sub 且无 target 时应自动补 /sub
+set('subs', 'https://w.example.com/UUID');
+set('plist3', '1.1.1.1 #HK');
+set('pkey3', 'auto'); set('target', ''); set('clientType', 'clash');
+getEl('gen3').click();
+let s = getEl('ol3').value.split('\n')[0];
+ok('未带 /sub 时自动补全', s.includes('/UUID/sub?'), s);
+ok('自动带上 target=clash', s.includes('target=clash'), s);
+// 已是 /sub 结尾：不应重复补
+set('subs', 'https://w.example.com/UUID/sub');
+getEl('gen3').click();
+s = getEl('ol3').value.split('\n')[0];
+ok('/sub 结尾不重复补', (s.match(/\/sub/g) || []).length === 1, s);
+// 参数里已显式带 target：不应再追加一个
+set('subs', 'https://w.example.com/UUID/sub');
+set('plist3', 'US | p=2.2.2.2&target=stash');
+getEl('gen3').click();
+s = getEl('ol3').value.split('\n')[0];
+ok('显式 target 不被覆盖', s.includes('target=stash') && !s.includes('target=clash'), s);
+// 客户端类型切到 sing-box
+set('plist3', '1.1.1.1 #HK'); set('clientType', 'singbox'); set('target', '');
+getEl('gen3').click();
+ok('客户端类型 singbox 生效', getEl('ol3').value.includes('target=singbox'), getEl('ol3').value);
+// target 输入框可覆盖下拉选择
+set('clientType', 'clash'); set('target', 'surge');
+getEl('gen3').click();
+ok('target 输入框覆盖下拉', getEl('ol3').value.includes('target=surge'), getEl('ol3').value);
+set('target', '');
+// 「只要 Clash 订阅」按钮
+set('clientType', 'singbox');
+getEl('clashOnly').click();
+ok('Clash 快捷按钮切回 clash 并生成', getEl('clientType').value === 'clash' && getEl('ol3').value.includes('target=clash'), getEl('ol3').value);
+
+sec('10b. 完整 Clash 配置');
+radios.forEach(r => r.checked = r.value === 'list');
+set('nodes', cases[0] + '\n' + cases[1] + '\n' + cases[2]);   // 2 条 ws + 1 条 xhttp
+set('plist', '11.1.1.1'); set('existMode', 'keep'); set('xhttpMode', 'keep');
+set('wk', ''); getEl('rmno').checked = false;
+getEl('gen1').click();
+getEl('genClash1').click();
+const cfg = getEl('ocf1').value;
+ok('完整配置已生成', cfg.length > 200, '长度 ' + cfg.length);
+for (const key of ['mixed-port:', 'dns:', 'proxies:', 'proxy-groups:', 'rules:']) {
+  ok('包含 ' + key, cfg.includes(key));
+}
+ok('配置里含 2 个 ws 代理', (cfg.match(/^  type: vless$|^  type: trojan$/gm) || []).length === 2, '实际 ' + (cfg.match(/^  type: (vless|trojan)$/gm) || []).length);
+ok('xhttp 节点被跳过并提示', getEl('clashFullStat').innerHTML.includes('跳过 1 条非 WS'), getEl('clashFullStat').innerHTML);
+ok('proxy-groups 引用了节点名', cfg.includes('proxy-groups:') && cfg.includes('type: select'));
+ok('规则以 MATCH 收尾', /- MATCH,/.test(cfg), cfg.split('\n').slice(-2).join(' | '));
+ok('fake-ip 与 DNS 配置齐备', cfg.includes('enhanced-mode: fake-ip') && cfg.includes('default-nameserver:'));
+// 无输出时应给出提示而不是生成空配置
+set('ol1', '');
+getEl('genClash1').click();
+ok('无输出时提示且不生成', getEl('ocf1').value === '' && getEl('clashFullStat').innerHTML.includes('请先'), getEl('clashFullStat').innerHTML);
+
+/* ========== 11. Clash YAML 导入 / 编辑 / 写回 ========== */
+sec('11. Clash YAML 导入与写回');
+const SAMPLE_YAML = [
+  '# 我的 Clash 配置（注释必须保留）',
+  'mixed-port: 7890',
+  'mode: rule',
+  'dns:',
+  '  enable: true',
+  '  nameserver:',
+  '    - 223.5.5.5',
+  '',
+  'proxies:',
+  '- name: "节点A"',
+  '  type: vless',
+  '  server: 1.2.3.4',
+  '  port: 443',
+  '  uuid: uuid-aaaa',
+  '  udp: true',
+  '  tls: true',
+  '  servername: "a.example.com"',
+  '  network: ws',
+  '  ws-opts:',
+  '    path: "/abc?ed=2048&p=1.1.1.1%3A443"',
+  '    headers:',
+  '      Host: "a.example.com"',
+  '- name: "节点B"',
+  '  type: trojan',
+  '  server: 5.6.7.8',
+  '  port: 8443',
+  '  password: "pw"',
+  '  tls: true',
+  '  network: ws',
+  '  ws-opts:',
+  '    path: "/tj"',
+  '- name: "机场SS"',
+  '  type: ss',
+  '  server: 9.9.9.9',
+  '  port: 8388',
+  '  cipher: aes-256-gcm',
+  '  password: "sspw"',
+  '',
+  'proxy-groups:',
+  '  - name: "🚀 节点选择"',
+  '    type: select',
+  '    proxies:',
+  '      - "节点A"',
+  '      - "节点B"',
+  '      - "机场SS"',
+  '',
+  'rules:',
+  '  - MATCH,🚀 节点选择',
+  ''
+].join('\n');
+
+set('importArea', SAMPLE_YAML);
+getEl('clearBtn').click();
+getEl('importBtn').click();
+ok('识别为 Clash 配置并导入 2 条可编辑节点', api.nodeList().length === 2, '导入 ' + api.nodeList().length + ' 条：' + getEl('stat2').innerHTML);
+ok('非 VLESS/Trojan 被提示原样保留', getEl('stat2').innerHTML.includes('原样保留'), getEl('stat2').innerHTML);
+ok('写回区已显示', getEl('clashOutBox').style.display === '');
+
+const n0 = api.nodeList()[0];
+ok('解析出 p 参数', n0.pp.some(([k, v]) => k === 'p' && v === '1.1.1.1:443'), JSON.stringify(n0.pp));
+ok('解析出 ws path 前缀', n0.pPath === '/abc', n0.pPath);
+ok('解析出 Host 头', n0.host === 'a.example.com', n0.host);
+ok('解析出 SNI', n0.sni === 'a.example.com', n0.sni);
+ok('trojan 密码解析正确', api.nodeList()[1].auth === 'pw', api.nodeList()[1].auth);
+
+// 未改动直接写回：proxies 以外的内容必须逐字节一致
+getEl('clashExport').click();
+const roundTrip = getEl('clashOut').value;
+const keptHead = SAMPLE_YAML.slice(0, SAMPLE_YAML.indexOf('proxies:'));
+ok('注释与 dns 区块原样保留', roundTrip.startsWith(keptHead), '\n        期望开头: ' + JSON.stringify(keptHead));
+ok('proxy-groups 及之后原样保留', roundTrip.includes('proxy-groups:\n  - name: "🚀 节点选择"'), '');
+ok('rules 原样保留', roundTrip.trimEnd().endsWith('- MATCH,🚀 节点选择'), JSON.stringify(roundTrip.slice(-40)));
+ok('ss 节点按原文保留', roundTrip.includes('type: ss') && roundTrip.includes('cipher: aes-256-gcm'));
+// 策略组仍引用着原有名字，写回后引用不应断裂
+ok('写回后节点名未变（引用不断裂）', roundTrip.includes('- name: "节点A"') && roundTrip.includes('- name: "节点B"'));
+
+// 编辑后写回
+api.openEditor(0);
+set('edP', '2.2.2.2:8443'); set('edExist', 'overwrite');
+api.updatePreview(); api.saveEditor();
+getEl('clashExport').click();
+const edited = getEl('clashOut').value;
+ok('编辑后的 p 已写回 YAML', edited.includes('p=2.2.2.2%3A8443'), edited.match(/path: "[^"]*"/)?.[0]);
+ok('编辑后其余区块仍不变', edited.startsWith(keptHead) && edited.trimEnd().endsWith('- MATCH,🚀 节点选择'));
+ok('编辑后 YAML 仍可被重新导入', (() => {
+  set('importArea', edited); getEl('clearBtn').click(); getEl('importBtn').click();
+  const again = api.nodeList();
+  return again.length === 2 && again[0].pp.some(([k, v]) => k === 'p' && v === '2.2.2.2:8443');
+})(), '二次导入结果 ' + api.nodeList().length + ' 条');
+// 清空后应恢复原状
+getEl('clearBtn').click();
+getEl('clashExport').click();
+ok('清空后导出提示需先导入', getEl('clashOutStat').innerHTML.includes('还没有导入过'), getEl('clashOutStat').innerHTML);
+
+// 普通链接导入不应触发 Clash 写回
+set('importArea', cases[0]);
+getEl('importBtn').click();
+getEl('clashExport').click();
+ok('链接导入不误判为 Clash', getEl('clashOutStat').innerHTML.includes('还没有导入过'), getEl('clashOutStat').innerHTML);
+
+/* ========== 12. YAML 节点 → ① 「入口 IP 自动作为 ProxyIP」 ========== */
+sec('12. YAML 节点送入 ① 的入口自反代模式');
+set('importArea', SAMPLE_YAML);
+getEl('clearBtn').click();
+getEl('importBtn').click();
+ok('YAML 已导入 2 条', api.nodeList().length === 2, '实际 ' + api.nodeList().length);
+// 直接粘 YAML 到 ① 是不行的（这是设计现状，先固化行为）
+set('nodes', SAMPLE_YAML); set('plist', '');
+radios.forEach(r => r.checked = r.value === 'self');
+getEl('gen1').click();
+ok('把 YAML 原样贴进 ① 会被拒绝（提示忽略非链接行）', getEl('out1').style.display === 'none' && getEl('stat1').innerHTML.includes('忽略非 VLESS/Trojan'), getEl('stat1').innerHTML);
+// 用桥接按钮送过去
+getEl('sendToBatch2').click();
+const bridged = getEl('nodes').value.split('\n').filter(Boolean);
+ok('桥接后 ① 收到 2 条链接', bridged.length === 2, '实际 ' + bridged.length + '：' + bridged[0]);
+ok('桥接后的链接是合法 vless/trojan', bridged.every(l => /^(vless|trojan):\/\//.test(l)), bridged.join(' | '));
+ok('桥接保留了 uuid 与 sni', bridged[0].includes('uuid-aaaa') && bridged[0].includes('a.example.com'), bridged[0]);
+ok('桥接保留了 path 内的 p 参数', decodeURIComponent(bridged[0]).includes('p=1.1.1.1:443'), decodeURIComponent(bridged[0]));
+ok('桥接保留了 Host', bridged[0].includes('host=a.example.com'), bridged[0]);
+// 桥接后 self 模式应能正常生成
+radios.forEach(r => r.checked = r.value === 'self');
+getEl('gen1').click();
+const selfOut = getEl('ol1').value.split('\n').filter(Boolean);
+ok('self 模式基于 YAML 节点生成 2 条', selfOut.length === 2, '实际 ' + selfOut.length + '：' + getEl('stat1').innerHTML);
+// 默认「已有参数=保留」：原本已有 p 的节点不会改，原本没有 p 的节点写入自己的入口
+ok('已有 p 的节点在 keep 下不被覆盖', api.parseNode(selfOut[0]).pp.some(([k, v]) => k === 'p' && v === '1.1.1.1:443'), JSON.stringify(api.parseNode(selfOut[0]).pp));
+ok('原本无 p 的节点写入自己的入口 IP:端口', api.parseNode(selfOut[1]).pp.some(([k, v]) => k === 'p' && v === '5.6.7.8:8443'), JSON.stringify(api.parseNode(selfOut[1]).pp));
+ok('self 模式不会产生重复 p', api.parseNode(selfOut[0]).pp.filter(([k]) => k === 'p').length === 1, JSON.stringify(api.parseNode(selfOut[0]).pp));
+ok('原有 ed=2048 未被破坏', api.parseNode(selfOut[0]).pp.some(([k, v]) => k === 'ed' && v === '2048'), JSON.stringify(api.parseNode(selfOut[0]).pp));
+// 切到「覆盖」后应改用自己的入口
+set('existMode', 'overwrite');
+radios.forEach(r => r.checked = r.value === 'self');
+getEl('gen1').click();
+const selfOut2 = getEl('ol1').value.split('\n').filter(Boolean);
+ok('改为覆盖后，p 变成自己的入口 1.2.3.4:443', api.parseNode(selfOut2[0]).pp.some(([k, v]) => k === 'p' && v === '1.2.3.4:443'), JSON.stringify(api.parseNode(selfOut2[0]).pp));
+set('existMode', 'keep');
 
 console.log('\n================ 结果: PASS ' + pass + ' / FAIL ' + fail + ' ================');
 process.exit(fail ? 1 : 0);
