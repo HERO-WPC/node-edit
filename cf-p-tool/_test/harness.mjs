@@ -799,5 +799,99 @@ ok('写回 YAML 时写入的 p 一并生效',
   getEl('clashOut').value.includes('p=1.2.3.4%3A443') && getEl('clashOut').value.includes('p=5.6.7.8%3A8443'), clashPaths);
 ok('写回 YAML 后仍保留原有 ed 参数', getEl('clashOut').value.includes('ed=2048'), clashPaths);
 
+/* ========== 16. YAML 写回：注释、格式与顺序保真 ========== */
+sec('16. 写回保真：注释 / 格式 / 顺序');
+// 这份配置刻意使用「非本工具风格」：列 0 注释、行内注释、单引号、
+// 键序与工具不同、无 udp 字段。用于验证未改动的节点会被原样保留。
+const STYLED = [
+  'proxies:',
+  '',
+  '# 香港节点',
+  '- type: vless          # 类型写在前',
+  "  name: 'HK-01'",
+  '  server: 1.2.3.4',
+  '  port: 443',
+  '  uuid: 1111',
+  '  network: ws',
+  '  tls: true',
+  '  servername: a.example.com',
+  '  ws-opts:',
+  '    path: /ws?ed=2048',
+  '    headers:',
+  '      Host: a.example.com',
+  '',
+  '# 日本节点',
+  "- type: vless",
+  "  name: 'JP-01'",
+  '  server: 5.6.7.8',
+  '  port: 443',
+  '  uuid: 2222',
+  '  network: ws',
+  '  tls: true',
+  '  servername: b.example.com',
+  '  ws-opts:',
+  '    path: /tj',
+  '',
+  'proxy-groups:',
+  "  - name: 'G'",
+  '    type: select',
+  '    proxies:',
+  "      - 'HK-01'",
+  "      - 'JP-01'",
+  '',
+  'rules:',
+  '  - MATCH,G',
+  '',
+].join('\n');
+
+set('importArea', STYLED);
+getEl('clearBtn').click();
+getEl('importBtn').click();
+ok('列 0 注释不再截断 proxies 区块（回归）', api.nodeList().length === 2, '实际导入 ' + api.nodeList().length + ' 条');
+ok('行内注释不污染字段值（回归）', api.nodeList()[0].scheme === 'vless' && api.nodeList()[0].type === 'ws',
+  'scheme=' + api.nodeList()[0].scheme + ' type=' + api.nodeList()[0].type);
+ok('单引号值被正确解析', api.nodeList()[0].name === 'HK-01' && api.nodeList()[1].name === 'JP-01',
+  api.nodeList()[0].name + ' / ' + api.nodeList()[1].name);
+
+// 场景 A：完全不动直接写回 → proxies 区块应与原文一致（末尾空行归一化后）
+getEl('clashExport').click();
+const outA = getEl('clashOut').value;
+const normBlock = s => s.replace(/\n+$/, '');
+const origBlock = STYLED.slice(STYLED.indexOf('proxies:'), STYLED.indexOf('proxy-groups:'));
+const outBlock = outA.slice(outA.indexOf('proxies:'), outA.indexOf('proxy-groups:'));
+ok('未改动写回时 proxies 区块逐字节一致（忽略末尾空行）', normBlock(origBlock) === normBlock(outBlock),
+  '\n        原: ' + JSON.stringify(normBlock(origBlock)) + '\n        新: ' + JSON.stringify(normBlock(outBlock)));
+ok('写回后列 0 注释仍在', outA.includes('# 香港节点'));
+ok('写回后行内注释仍在', outA.includes('# 类型写在前'));
+ok('写回后单引号风格仍在', outA.includes("name: 'HK-01'"));
+ok('未改动时不额外添加字段', !outA.includes('udp: true'), '');
+ok('提示说明未修改条数', getEl('clashOutStat').innerHTML.includes('2 条未修改，原文照抄'), getEl('clashOutStat').innerHTML);
+
+// 场景 B：只改第 1 个节点 → 第 2 个仍原文照抄，顺序不变
+api.openEditor(0);
+set('edP', '7.7.7.7:443'); set('edExist', 'overwrite');
+api.updatePreview(); api.saveEditor();
+getEl('clashExport').click();
+const outB = getEl('clashOut').value;
+const idx1 = outB.indexOf("name: 'HK-01'");
+const idx2 = outB.indexOf("name: 'JP-01'");
+const idxBuilt = outB.indexOf('name: "HK-01"');
+ok('只改动的节点被重建', outB.includes('p=7.7.7.7%3A443') && idxBuilt > -1, outB.match(/^-\s+name:.*$/gm)?.join(' | '));
+ok('未改动节点保持原文（单引号仍在）', idx2 > -1, outB.match(/^-\s+name:.*$/gm)?.join(' | '));
+ok('改动节点仍是第 1 项（顺序不变）', Math.min(...[idxBuilt, idx2].filter(i => i > -1)) === idxBuilt,
+  'built@' + idxBuilt + ' untouched@' + idx2);
+ok('改动节点的其它字段仍被保留', outB.includes('servername: "a.example.com"'), '');
+ok('提示区分「原文照抄」与「重建」', getEl('clashOutStat').innerHTML.includes('1 条未修改，原文照抄') && getEl('clashOutStat').innerHTML.includes('1 条已按标准格式重建'),
+  getEl('clashOutStat').innerHTML);
+// 原有 ed 参数在重建节点里也要保留
+ok('重建节点的 ed 参数未丢', outB.includes('ed=2048'), outB.match(/path: "[^"]*"/g)?.join(' | '));
+// proxy-groups / rules 仍逐字节保留
+ok('proxy-groups 与 rules 未被改动', outB.includes("proxy-groups:\n  - name: 'G'") && outB.trimEnd().endsWith('- MATCH,G'));
+// 值里含 # 的密码不能被截断
+set('importArea', 'proxies:\n- type: trojan\n  name: "T"\n  server: 1.1.1.1\n  port: 443\n  password: "p#ssw0rd"\n  tls: true\n  network: ws\n  ws-opts:\n    path: /x\nrules:\n  - MATCH,DIRECT\n');
+getEl('clearBtn').click();
+getEl('importBtn').click();
+ok('引号内的 # 不被当作注释（密码含 #）', api.nodeList()[0].auth === 'p#ssw0rd', JSON.stringify(api.nodeList()[0].auth));
+
 console.log('\n================ 结果: PASS ' + pass + ' / FAIL ' + fail + ' ================');
 process.exit(fail ? 1 : 0);

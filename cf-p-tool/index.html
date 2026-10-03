@@ -981,9 +981,27 @@ function unquote(v) {
       (v.startsWith("'") && v.endsWith("'") && v.length > 1)) return v.slice(1, -1);
   return v;
 }
+/* 去掉行内注释：YAML 中只有引号外的 # 才是注释起点。
+   不能简单地 split('#')——密码、UUID、路径里都可能含 #。 */
+function stripComment(v) {
+  const s = String(v);
+  let inS = false, inD = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (c === "'" && !inD) inS = !inS;
+    else if (c === '"' && !inS) inD = !inD;
+    else if (c === '#' && !inS && !inD && (i === 0 || /\s/.test(s[i - 1]))) return s.slice(0, i);
+  }
+  return s;
+}
+/* 取一个标量值：先剥注释，再去掉成对引号 */
+function scalarValue(v) {
+  return unquote(stripComment(String(v)).trim());
+}
 /* 定位顶层 "proxies:" 区块，返回块内文本（不含该键行）、基准缩进以及首尾原文 */
 function splitProxiesBlock(text) {
-  const lines = text.split('\n');
+  // 统一换行符：配置可能来自 Windows（CRLF），按 \n 切分会让每行末尾残留 \r
+  const lines = String(text).replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
   let start = -1;
   for (let i = 0; i < lines.length; i++) {
     if (/^proxies:\s*(#.*)?$/.test(lines[i])) { start = i; break; }
@@ -992,10 +1010,12 @@ function splitProxiesBlock(text) {
   let end = lines.length;
   for (let i = start + 1; i < lines.length; i++) {
     const l = lines[i];
-    if (!l.trim()) continue;
+    const t = l.trim();
+    if (!t) continue;                       // 空行
+    if (t.startsWith('#')) continue;        // 注释：列 0 的注释也要算在区块内，不能当作结束标志
     const indent = l.length - l.replace(/^\s+/, '').length;
-    // 下一个顶层键（列 0 且不是序列项）即区块结束
-    if (indent === 0 && !/^-/.test(l.trim())) { end = i; break; }
+    // 下一个顶层键（列 0、既不是序列项也不是注释）才是区块结束
+    if (indent === 0 && !t.startsWith('-')) { end = i; break; }
   }
   const head = lines.slice(0, start + 1).join('\n');
   const body = lines.slice(start + 1, end);
@@ -1010,37 +1030,46 @@ function splitProxiesBlock(text) {
 function parseProxiesBlock(body, baseIndent) {
   const items = [];
   let cur = null;
+  let pending = [];          // 前导的空行/注释：归属到紧随其后的那个条目，
+                             // 这样未改动的条目连注释一起原样写回
   for (const line of body) {
-    if (!line.trim() || /^\s*#/.test(line)) continue;
+    // 空行/注释一律先入 pending：若后面紧跟 "- " 就归给它，
+    // 否则（属于上一个条目的尾部）在遇到普通键行时补回上一个条目
+    if (!line.trim() || /^\s*#/.test(line)) { pending.push(line); continue; }
     const indent = line.length - line.replace(/^\s+/, '').length;
     const t = line.trim();
     if (indent === baseIndent && t.startsWith('- ')) {
-      cur = { lines: [line], vals: {}, maps: [{ indent: baseIndent, node: null }] };
+      cur = { lines: pending.concat([line]), vals: {}, maps: [{ indent: baseIndent, node: null }] };
+      pending = [];
       items.push(cur);
       // 序列项的第一个键属于该项自身，缩进视为 baseIndent
       const body2 = t.slice(2);
       const m = body2.match(/^([\w-]+):\s*(.*)$/);
       if (m) {
-        if (m[2] === '') { cur.vals[m[1]] = {}; cur.maps.push({ indent: baseIndent, node: cur.vals[m[1]] }); }
-        else cur.vals[m[1]] = unquote(m[2]);
+        const v = scalarValue(m[2]);
+        if (v === '') { cur.vals[m[1]] = {}; cur.maps.push({ indent: baseIndent, node: cur.vals[m[1]] }); }
+        else cur.vals[m[1]] = v;
       }
       continue;
     }
     if (!cur) continue;
+    if (pending.length) { cur.lines.push(...pending); pending = []; }
     cur.lines.push(line);
     // 收缩到当前缩进所属的嵌套映射
     while (cur.maps.length > 1 && indent < cur.maps[cur.maps.length - 1].indent) cur.maps.pop();
     const target = cur.maps[cur.maps.length - 1].node || cur.vals;
     const m = t.match(/^([\w-]+):\s*(.*)$/);
     if (!m) continue;
-    if (m[2] === '') {
+    const v = scalarValue(m[2]);
+    if (v === '') {
       target[m[1]] = {};
       cur.maps.push({ indent, node: target[m[1]] });
-    } else target[m[1]] = unquote(m[2]);
+    } else target[m[1]] = v;
   }
-  const nodes = [], raw = [], unsupported = [];
+  const nodes = [], raw = [], unsupported = [], header = [];
   for (const it of items) {
     const v = it.vals;
+    header.push(it.lines.join('\n'));      // 记录原始顺序，写回时按此顺序放回
     const proto = String(v.type || '').toLowerCase();
     if (proto !== 'vless' && proto !== 'trojan') {
       raw.push(it.lines.join('\n'));
@@ -1085,10 +1114,15 @@ function parseProxiesBlock(body, baseIndent) {
       extra: '',
       pPath,
       pp,
-      _src: 'clash'
+      _src: 'clash',
+      // 记住该节点在原文中的完整文本与导入时的字段快照：
+      // 写回时若字段未变，就照抄原文，避免把用户自己的缩进/引号/键序/注释改掉
+      _rawEntry: it.lines.join('\n'),
     });
   }
-  return { nodes, raw, unsupported };
+  // 快照在建好节点对象之后、用同一个函数计算，避免两边表示不一致
+  for (const n of nodes) n._snapshot = clashEntrySnapshot(n);
+  return { nodes, raw, unsupported, header };
 }
 function clashYamlState(text) {
   const split = splitProxiesBlock(text);
@@ -1290,7 +1324,7 @@ function importClashYaml(text) {
     if (nodeList.some(x => x._id === n._id)) { dup++; continue; }
     nodeList.push(n); added++;
   }
-  clashSession = { head: st.head, tail: st.tail, raw: st.raw, unsupported: st.unsupported };
+  clashSession = { head: st.head, tail: st.tail, raw: st.raw, unsupported: st.unsupported, header: st.header || [] };
   const box = document.getElementById('clashOutBox');
   if (box) box.style.display = '';
   showStat2('<b class="ok">已从 Clash 配置导入 ' + added + ' 条</b>' +
@@ -1478,6 +1512,22 @@ function saveEditor() {
   openEditor(editingIdx);
 }
 
+/* 判断从 Clash 导入的节点自导入以来是否被改动过。
+   未改动 → 写回时照抄原文，保留用户自己的缩进、引号、键序与行内注释；
+   改动过 → 才用工具的标准序列化重建。 */
+function clashEntrySnapshot(n) {
+  return JSON.stringify([
+    n.scheme, n.auth, String(n.server || ''), String(n.port || ''),
+    n.name || '', n.type, n.security || '', n.sni || '', n.host || '',
+    n.pPath === null ? '' : (n.pPath + (n.pp && n.pp.length ? '?' + n.pp.map(([k, v]) => k + '=' + v).join('&') : '')),
+    n.fp || '', n.alpn || '',
+  ]);
+}
+function clashEntryChanged(n) {
+  if (!n._snapshot) return true;               // 没有快照（非 YAML 来源）→ 按改动处理
+  return clashEntrySnapshot(n) !== n._snapshot;
+}
+
 function exportClashYaml() {
   const stat = document.getElementById('clashOutStat');
   if (!clashSession) {
@@ -1485,22 +1535,38 @@ function exportClashYaml() {
     return;
   }
   const editable = nodeList.filter(n => n._src === 'clash');
-  const built = editable.map(buildNode);
-  const objs = built.map(r => parseNode(r)).map(nodeToClashObj).filter(Boolean);
-  const unsupportedCount = clashSession.raw.length;
-  const skipped = editable.length - objs.length;
-  if (!objs.length && !unsupportedCount) {
+  const changed = editable.filter(clashEntryChanged);
+  const untouched = editable.filter(n => !clashEntryChanged(n));
+
+  // 按导入时的原始顺序放回：未改动的照抄原文，改动过的就地替换为重建结果
+  const rawOf = new Map();                      // 原文 → 重建文本
+  for (const n of changed) {
+    const obj = nodeToClashObj(parseNode(buildNode(n)));
+    rawOf.set(n._rawEntry, obj ? clashObjsToYaml([obj]) : '');
+  }
+  const slots = (clashSession.header || []).map(r => rawOf.has(r) ? rawOf.get(r) : r);
+  const skipped = changed.length - [...rawOf.values()].filter(Boolean).length;
+
+  // 非原先配置里的新条目（例如 YAML 导入后又额外引入的节点）追加到末尾
+  const appended = changed
+    .filter(n => !(clashSession.header || []).some(r => r === n._rawEntry))
+    .map(n => nodeToClashObj(parseNode(buildNode(n))))
+    .filter(Boolean);
+  const appendedText = appended.length ? clashObjsToYaml(appended) : '';
+
+  const blocks = [slots.filter(Boolean).join('\n'), appendedText, clashSession.raw.join('\n')].filter(Boolean);
+  if (!blocks.length) {
     stat.innerHTML = '<b class="skip">没有可写出的节点（xhttp 无法表示为 Clash 代理）。</b>';
     return;
   }
-  const blocks = [];
-  if (objs.length) blocks.push(clashObjsToYaml(objs));
-  if (unsupportedCount) blocks.push(clashSession.raw.join('\n'));
   const yaml = blocks.join('\n');
   const out = clashSession.head + '\n' + yaml + (yaml.endsWith('\n') ? '' : '\n') + clashSession.tail;
   document.getElementById('clashOut').value = out;
-  stat.innerHTML = '<b class="ok">已写回 ' + objs.length + ' 条节点</b>' +
-    (unsupportedCount ? '　<b class="ok">原样保留 ' + unsupportedCount + ' 条其它协议</b>' : '') +
+  const rebuiltCount = [...rawOf.values()].filter(Boolean).length + appended.length;
+  stat.innerHTML = '<b class="ok">已写回 ' + (untouched.length + rebuiltCount) + ' 条节点</b>' +
+    (untouched.length ? '　<b class="ok">其中 ' + untouched.length + ' 条未修改，原文照抄</b>' : '') +
+    (rebuiltCount ? '　<b class="skip">' + rebuiltCount + ' 条已按标准格式重建</b>' : '') +
+    (clashSession.raw.length ? '　<b class="ok">原样保留 ' + clashSession.raw.length + ' 条其它协议</b>' : '') +
     (skipped ? '　<b class="skip">跳过 ' + skipped + ' 条（非 ws，Clash 无法表示）</b>' : '') +
     '　<b class="ok">proxies 以外的内容未改动</b>';
 }
